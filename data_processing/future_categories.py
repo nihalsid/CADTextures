@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
 from collections import defaultdict
-from shutil import copytree
+from shutil import copytree, rmtree
+from tqdm import tqdm
 
 from util.misc import read_list
 
@@ -30,7 +31,9 @@ def copy_future_categories():
     destination_path = Path("/cluster/gimli/ysiddiqui/future3d/3D-FUTURE-model/Sofa")
     destination_path.mkdir(exist_ok=True, parents=True)
     ids = read_list('data/splits/3D-FUTURE/Sofa/all.txt')
-    for _id in ids:
+    for _id in tqdm(ids, desc='copy'):
+        if (destination_path / _id).exists():
+            rmtree(destination_path / _id)
         copytree(source_path / _id, destination_path / _id)
 
 
