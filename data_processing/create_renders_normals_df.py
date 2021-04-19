@@ -16,7 +16,7 @@ if __name__ == "__main__":
 
     shapes_all = read_list('data/splits/3D-FUTURE/Sofa/all.txt')
     shapes = [x for i, x in enumerate(shapes_all) if i % args.num_proc == args.proc]
-    shapes = shapes[:2]
+    # shapes = shapes[:2]
     failed_shapes = []
     for shape in shapes:
         try:
