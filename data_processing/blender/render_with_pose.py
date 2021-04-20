@@ -7,6 +7,7 @@ import numpy as np
 import json
 from mathutils import Matrix
 import math
+from PIL import Image
 base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 from math import radians
 import mathutils
@@ -115,6 +116,7 @@ for obj in bpy.data.objects:
     obj.select_set(True)
 bpy.ops.object.delete()
 
+
 def add_light(name, location):
     # Create light datablock
     light_data = bpy.data.lights.new(name=name+'-data', type='POINT')
@@ -126,6 +128,7 @@ def add_light(name, location):
     # Change light position
     light_object.location = location
 
+
 def look_at(obj_camera, point):
     loc_camera = obj_camera.location
     direction = point - loc_camera
@@ -134,7 +137,8 @@ def look_at(obj_camera, point):
     print(rot_quat.to_euler())
     # assume we're using euler rotation
     obj_camera.rotation_euler = rot_quat.to_euler()
-    
+
+
 def render_pose_function(model_file, texture_file): 
     bpy.context.scene.render.image_settings.file_format = 'PNG'
     bpy.context.scene.render.image_settings.color_depth = '8'
@@ -251,7 +255,50 @@ def render_pose_function(model_file, texture_file):
     # delete objects in sys
     # clear_scene()
 
+def render_noc(model_file, texture_file):
+    try: 
+        bpy.ops.import_scene.obj(filepath=model_file)
+    except: return None
+    model = bpy.context.scene.objects["normalized_model"]       # Get the object
+    bpy.ops.object.select_all(action='DESELECT') # Deselect all objects
+    bpy.context.view_layer.objects.active = model   # Make the cube the active object 
+    model.select_set(True)
+    
+    tex_mat = bpy.data.materials.new('texture_coords')
+    bpy.data.materials['texture_coords'].use_nodes = True
+    texture_tree = bpy.data.materials['texture_coords'].node_tree
+    texture_links = texture_tree.links
+    texture_node = texture_tree.nodes.new("ShaderNodeTexCoord")
+    model.data.materials[0] = tex_mat
+    texture_links.new(texture_node.outputs[0], texture_tree.nodes['Principled BSDF'].inputs[0])
+    noc_map_name = "NOCMap"
+    image_size = Image.open(texture_file).size
+    noc_map = bpy.data.images.new(noc_map_name, image_size[0], image_size[1])
+    
+    for mat in model.data.materials:
+        mat.use_nodes = True 
+        nodes = mat.node_tree.nodes
+        texture_node = nodes.new('ShaderNodeTexImage')
+        texture_node.name = 'Bake_node'
+        texture_node.select = True
+        nodes.active = texture_node
+        texture_node.image = noc_map
+        
+    model_id = model_file.split('/')[-2]
+    bpy.context.view_layer.objects.active = model
+    bpy.context.scene.render.bake.margin = 1
+    bpy.ops.object.bake(type='DIFFUSE', pass_filter={"COLOR"}, save_mode='EXTERNAL')
+    noc_map.save_render(os.path.join(base_dir, "data/3D-FUTURE/Sofa", model_id, f'noc.png'))
+    
+    for mat in model.data.materials:
+        for n in mat.node_tree.nodes:
+            if n.name == 'Bake_node':
+                mat.node_tree.nodes.remove(n)
+
+
 model_file = os.path.join(base_dir, "data/3D-FUTURE-model/Sofa", args.model_id, "normalized_model.obj") 
-texture_file = os.path.join(base_dir, "data/3D-FUTURE-model/Sofa", args.model_id, "texture.png") 
+texture_file = os.path.join(base_dir, "data/3D-FUTURE-model/Sofa", args.model_id, "texture.png")
 
 render_pose_function(model_file, texture_file)
+clear_scene()
+render_noc(model_file, texture_file)

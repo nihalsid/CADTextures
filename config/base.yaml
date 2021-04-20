@@ -1,0 +1,24 @@
+defaults:
+  - dataset: future_sofa
+  - inputs: all
+  - model: base
+
+experiment: fast_dev
+seed: null
+wandb_main: False
+suffix: ''
+save_epoch: 5
+sanity_steps: 0
+max_epoch: 100
+val_check_percent: 1
+val_check_interval: 1
+resume: null
+
+batch_size: 8
+num_workers: 8
+lr: 0.0001
+
+hydra:
+  output_subdir: null # Disable saving of config files. We'll do that ourselves.
+  run:
+    dir: .

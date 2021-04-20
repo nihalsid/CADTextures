@@ -1,0 +1,4 @@
+# @package _group_
+input_texture_ngf: 24
+render_ngf: 16
+df_ngf: 12
