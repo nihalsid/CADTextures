@@ -4,10 +4,7 @@ from argparse import ArgumentParser
 import subprocess
 import numpy as np
 import marching_cubes as mc
-import math
-from tqdm import tqdm
 import os
-import torch
 
 highres_dim = 64
 padding_highres = 2
@@ -38,21 +35,15 @@ def export_distance_field(mesh_path, output_path, visualize=False):
         visualize_highres(output_path)
 
 
-def get_valid_objects(limit=None):
-    splitsdir = Path("../Repatch3D/data/splits/ShapeNetV2/official")
-    all_items = []
-    for split in ["train.txt", "val.txt"]:
-        all_items.extend((splitsdir/split).read_text().splitlines())
-    return sorted(all_items[:limit])
-
-
 if __name__ == '__main__':
     base_dir = Path(os.path.realpath(__file__)).parents[0].parents[0].parents[0]
     parser = ArgumentParser()
-    parser.add_argument("--model_id", type=str, default='mesh path')
+    parser.add_argument("--dataset", type=str, default='')
+    parser.add_argument("--model_id", type=str, default='')
     args = parser.parse_args()
-    shape_path = Path(base_dir, "data/3D-FUTURE-model/Sofa", args.model_id, "normalized_model.obj")
-    output_path = Path(base_dir, "data/3D-FUTURE/Sofa", args.model_id, f'shape_df')
+    dataset_0, dataset_1 = args.dataset.split('/')
+    shape_path = Path(base_dir, f"data/{dataset_0}-model/{dataset_1}", args.model_id, "normalized_model.obj")
+    output_path = Path(base_dir, f"data/{dataset_0}/{dataset_1}", args.model_id, f'shape_df')
     mesh = trimesh.load(shape_path, force='mesh')
     if type(mesh) != trimesh.Trimesh:
         mesh = mesh.dump().sum()

@@ -40,7 +40,7 @@ class TextureMapDataset(Dataset):
                 }
 
         if config.dataset.splits_dir.startswith('overfit'):
-            multiplier = 240 if split == 'train' else 1
+            multiplier = 240 if split == 'train' else 24
             self.items = self.items * multiplier
 
     def load_view_independent_data_from_disk(self, item_index):
@@ -142,9 +142,9 @@ class TextureMapDataset(Dataset):
         thumbnail = np.zeros((size, size, 3), dtype=np.float32)
         image_array = np.array(image).astype(np.float32)
         if image_array.shape[2] == 2:
-            thumbnail[:size, :size, 0] = image_array[:, :, 0]
-            thumbnail[:size, :size, 1] = image_array[:, :, 0]
-            thumbnail[:size, :size, 2] = image_array[:, :, 0]
+            thumbnail[:image_array.shape[0], :image_array.shape[1], 0] = image_array[:, :, 0]
+            thumbnail[:image_array.shape[0], :image_array.shape[1], 1] = image_array[:, :, 0]
+            thumbnail[:image_array.shape[0], :image_array.shape[1], 2] = image_array[:, :, 0]
         else:
-            thumbnail[:size, :size, :] = image_array[:, :, :3]
+            thumbnail[:image_array.shape[0], :image_array.shape[1], :] = image_array[:, :, :3]
         return thumbnail

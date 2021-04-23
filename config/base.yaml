@@ -7,11 +7,11 @@ experiment: fast_dev
 seed: null
 wandb_main: False
 suffix: ''
-save_epoch: 5
+save_epoch: 15
 sanity_steps: 0
-max_epoch: 100
-val_check_percent: 1
-val_check_interval: 1
+max_epoch: 1000
+val_check_percent: 1.0
+val_check_interval: 15
 resume: null
 
 batch_size: 8
