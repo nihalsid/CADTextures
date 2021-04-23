@@ -1,2 +1,2 @@
 # @package _group_
-['noc', 'normal', 'render', 'distance_field']
+['noc', 'normal', 'render', 'noc_render', 'distance_field']

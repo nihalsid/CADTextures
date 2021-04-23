@@ -2,6 +2,7 @@ from shutil import copyfile
 from pathlib import Path
 from PIL import Image
 from tqdm import tqdm
+import numpy as np
 
 from util.misc import read_list, write_list
 
@@ -18,6 +19,24 @@ def create_cube_models_from_base():
         Image.new('RGB', (384, 384), (c[0], c[1], c[2])).save(output_folder / "texture.png")
 
 
+def create_cube_models_single_texture_from_base():
+    target_folder = "data/SingleShape-model/CubeSingleTexture"
+    base_folder = "data/SingleShape-model/Cube/base"
+    mask_array = np.array(Image.open("data/SingleShape-model/Cube/base/mask.png").resize((384, 384), resample=Image.NEAREST))
+    items = read_list(f"{base_folder}/256_train.txt") + read_list(f"{base_folder}/256_val.txt")
+    colors = [[int(y) for y in x.split(',')] for x in items]
+    for c in tqdm(colors):
+        output_folder = Path(target_folder) / f"{c[0]:03d}-{c[1]:03d}-{c[2]:03d}"
+        output_folder.mkdir(exist_ok=True)
+        for o in ["material.mtl", "normalized_model.obj"]:
+            copyfile(Path(base_folder) / o, output_folder / o)
+        image_array = np.array(Image.new('RGB', (384, 384), (c[0], c[1], c[2])))
+        image_array[mask_array, 0] = 255
+        image_array[mask_array, 1] = 255
+        image_array[mask_array, 2] = 255
+        Image.fromarray(image_array).save(output_folder / "texture.png")
+
+
 def create_split():
     base_folder = "data/SingleShape-model/Cube/base"
     for split in ['train', 'val']:
@@ -31,5 +50,5 @@ def create_split():
 
 
 if __name__ == "__main__":
-    # create_cube_models_from_base()
-    create_split()
+    create_cube_models_single_texture_from_base()
+    # create_split()

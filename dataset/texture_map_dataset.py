@@ -24,16 +24,18 @@ class TextureMapDataset(Dataset):
         if self.preload:
             for index in tqdm(range(len(self.items)), desc='preload_texmap_data'):
                 df, texture, normal, noc, mask_texture = self.load_view_independent_data_from_disk(index)
-                render_list, mask_render_list = [], []
+                render_list, noc_render_list, mask_render_list = [], [], []
                 for view_index in range(self.views_per_shape):
-                    render, mask_render = self.load_view_dependent_data_from_disk(index, view_index)
+                    render, noc_render, mask_render = self.load_view_dependent_data_from_disk(index, view_index)
                     render_list.append(render)
+                    noc_render_list.append(render)
                     mask_render_list.append(mask_render)
                 self.preload_dict[self.items[index]] = {
                     'df': df,
                     'texture': texture,
                     'normal': normal,
                     'noc': noc,
+                    'noc_render': noc_render_list,
                     'mask_texture': mask_texture,
                     'render': render_list,
                     'mask_render': mask_render_list
@@ -64,15 +66,19 @@ class TextureMapDataset(Dataset):
     def load_view_dependent_data_from_disk(self, item_index, view_index):
         item = self.items[item_index]
         image_path = self.path_to_dataset / item / f"rgb_{view_index:03d}.png"
+        noc_render_path = self.path_to_dataset / item / f"noc_render_{view_index:03d}.png"
         mask_path = self.path_to_dataset / item / f"silhoutte_{view_index:03d}.png"
         with Image.open(image_path) as render_im:
             render = np.array(render_im).astype(np.float32)
+        with Image.open(noc_render_path) as render_noc:
+            noc_render = np.array(render_noc).astype(np.float32)
         with Image.open(mask_path) as mask_im:
             mask_render = np.array(mask_im)
             mask_render = np.logical_and(np.logical_and(mask_render[:, :, 0] < 50, mask_render[:, :, 1] < 50), mask_render[:, :, 2] < 50)
         render[~mask_render, :] = 0
+        noc_render[~mask_render, :] = 0
         render = render[:, :, :3]
-        return np.ascontiguousarray(np.transpose(render, (2, 0, 1))), mask_render[np.newaxis, :, :]
+        return np.ascontiguousarray(np.transpose(render, (2, 0, 1))), np.ascontiguousarray(np.transpose(noc_render, (2, 0, 1))), mask_render[np.newaxis, :, :]
 
     def __len__(self):
         return len(self.items)
@@ -82,12 +88,13 @@ class TextureMapDataset(Dataset):
         view_index = random.randint(0, self.views_per_shape - 1)
         if self.preload:
             df, texture, normal, noc, mask_texture = self.preload_dict[item]['df'], self.preload_dict[item]['texture'], self.preload_dict[item]['normal'], self.preload_dict[item]['noc'], self.preload_dict[item]['mask_texture']
-            render_list, mask_render_list = self.preload_dict[item]['render'], self.preload_dict[item]['mask_render']
+            render_list, noc_render_list, mask_render_list = self.preload_dict[item]['render'], self.preload_dict[item]['noc_render'], self.preload_dict[item]['mask_render']
             render = render_list[view_index]
+            noc_render = noc_render_list[view_index]
             mask_render = mask_render_list[view_index]
         else:
             df, texture, normal, noc, mask_texture = self.load_view_independent_data_from_disk(index)
-            render, mask_render = self.load_view_dependent_data_from_disk(index, view_index)
+            render, noc_render, mask_render = self.load_view_dependent_data_from_disk(index, view_index)
         return {
             'name': f'{item}',
             'view_index': view_index,
@@ -95,6 +102,7 @@ class TextureMapDataset(Dataset):
             'texture': texture,
             'normal': normal,
             'noc': noc,
+            'noc_render': noc_render,
             'mask_texture': mask_texture.astype(np.float32),
             'render': render,
             'mask_render': mask_render.astype(np.float32)
@@ -105,6 +113,7 @@ class TextureMapDataset(Dataset):
         batch['texture'] = batch['texture'] / 255 - 0.5
         batch['normal'] = batch['normal'] / 255 - 0.5
         batch['noc'] = batch['noc'] / 255 - 0.5
+        batch['noc_render'] = batch['noc_render'] / 255 - 0.5
         batch['render'] = batch['render'] / 255 - 0.5
 
     @staticmethod
@@ -112,6 +121,7 @@ class TextureMapDataset(Dataset):
         batch['texture'] = batch['texture'].to(device)
         batch['normal'] = batch['normal'].to(device)
         batch['noc'] = batch['noc'].to(device)
+        batch['noc_render'] = batch['noc_render'].to(device)
         batch['mask_texture'] = batch['mask_texture'].to(device)
         batch['render'] = batch['render'].to(device)
         batch['mask_render'] = batch['mask_render'].to(device)
@@ -119,7 +129,7 @@ class TextureMapDataset(Dataset):
             batch['df'] = batch['df'].to(device)
 
     @staticmethod
-    def visualize_sample_pyplot(texture, normal, noc, mask_texture, render, mask_render):
+    def visualize_sample_pyplot(texture, normal, noc, mask_texture, render, noc_render, mask_render):
         import matplotlib.pyplot as plt
         texture = np.transpose(texture, (1, 2, 0))
         normal = np.transpose(normal, (1, 2, 0))
@@ -127,10 +137,11 @@ class TextureMapDataset(Dataset):
         render = np.transpose(render, (1, 2, 0))
         mask_render = mask_render.squeeze()
         mask_texture = mask_texture.squeeze()
-        f, axarr = plt.subplots(2, 3, figsize=(4, 6))
+        f, axarr = plt.subplots(2, 4, figsize=(4, 6))
         axarr[0, 0].imshow(texture + 0.5)
         axarr[0, 1].imshow(normal + 0.5)
         axarr[0, 2].imshow(render + 0.5)
+        axarr[0, 3].imshow(noc_render + 0.5)
         axarr[1, 0].imshow(noc + 0.5)
         axarr[1, 1].imshow(mask_texture + 0.5)
         axarr[1, 2].imshow(mask_render + 0.5)

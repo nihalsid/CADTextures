@@ -12,4 +12,4 @@
 
 cd /rhome/ysiddiqui/CADTextures/
 
-python trainer/train_texture_map_predictor.py sanity_steps=1 dataset=$RDATASET inputs=$RINPUT experiment=$REXPERIMENT wandb_main=True
+python trainer/train_texture_map_predictor.py sanity_steps=1 dataset=$RDATASET inputs=$RINPUT experiment=$REXPERIMENT model=$RMODEL wandb_main=True val_check_interval=150 save_epoch=150

@@ -23,9 +23,11 @@ class TextureMapPredictorModule(pl.LightningModule):
     def forward(self, batch):
         TextureMapDataset.apply_batch_transforms(batch)
         input_maps = batch['mask_texture']
-        condition = [torch.cat([batch['render'], batch['mask_render']], dim=1)]
+        condition = [torch.cat([batch['render'], batch['mask_render']], dim=1), ]
         if 'noc' in self.hparams.inputs:
             input_maps = torch.cat([input_maps, batch['noc']], dim=1)
+        if 'noc_render' in self.hparams.inputs:
+            condition[0] = torch.cat([condition[0], batch['noc_render']], dim=1)
         if 'normal' in self.hparams.inputs:
             input_maps = torch.cat([input_maps, batch['normal']], dim=1)
         if 'distance_field' in self.hparams.inputs:

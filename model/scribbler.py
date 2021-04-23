@@ -320,11 +320,14 @@ class ImageAnd3dFusionScribbler(ImageFusionScribbler):
 
 def get_model(config):
     map_channels = 1
+    render_channels = 4
     if 'noc' in config.inputs:
         map_channels += 3
     if 'normal' in config.inputs:
         map_channels += 3
+    if 'noc_render' in config.inputs:
+        render_channels += 3
     if 'distance_field' in config.inputs:
-        return ImageAnd3dFusionScribbler(map_channels, 4, 3, config.model.input_texture_ngf, config.model.render_ngf, config.model.df_ngf)
+        return ImageAnd3dFusionScribbler(map_channels, render_channels, 3, config.model.input_texture_ngf, config.model.render_ngf, config.model.df_ngf)
     else:
-        return ImageFusionScribbler(map_channels, 4, 3, config.model.input_texture_ngf, config.model.render_ngf)
+        return ImageFusionScribbler(map_channels, render_channels, 3, config.model.input_texture_ngf, config.model.render_ngf)
