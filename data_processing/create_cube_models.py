@@ -21,9 +21,9 @@ def create_cube_models_from_base():
 
 
 def create_cube_models_single_texture_from_base():
-    target_folder = "data/SingleShape-model/CubeSingleTexture"
+    target_folder = "data/SingleShape-model/CubeSingleTexture02"
     base_folder = "data/SingleShape-model/Cube/base"
-    mask_array = np.array(Image.open("data/SingleShape-model/Cube/base/mask.png").resize((384, 384), resample=Image.NEAREST))
+    mask_array = np.array(Image.open("data/SingleShape-model/Cube/base/mask_check.png").resize((384, 384), resample=Image.NEAREST))
     items = read_list(f"{base_folder}/256_train.txt") + read_list(f"{base_folder}/256_val.txt")
     colors = [[int(y) for y in x.split(',')] for x in items]
     for c in tqdm(colors):
@@ -81,5 +81,5 @@ def create_split():
 
 
 if __name__ == "__main__":
-    find_closest_texture_in_train()
+    create_cube_models_single_texture_from_base()
     # create_split()

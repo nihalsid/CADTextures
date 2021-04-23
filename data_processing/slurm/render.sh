@@ -9,4 +9,4 @@
 
 cd /rhome/ysiddiqui/CADTextures
 
-python data_processing/create_renders_normals_df.py --dataset SingleShape/CubeSingleTexture --blender /rhome/ysiddiqui/blender/blender --num_proc $SLURM_ARRAY_TASK_COUNT --proc $SLURM_ARRAY_TASK_ID
+python data_processing/create_renders_normals_df.py --dataset SingleShape/CubeSingleTexture02 --blender /rhome/ysiddiqui/blender/blender --num_proc $SLURM_ARRAY_TASK_COUNT --proc $SLURM_ARRAY_TASK_ID
