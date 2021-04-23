@@ -6,6 +6,7 @@ import torch
 import os
 import numpy as np
 from PIL import Image
+import json
 
 from dataset.texture_map_dataset import TextureMapDataset
 from model.scribbler import get_model
@@ -85,7 +86,7 @@ class TextureMapPredictorModule(pl.LightningModule):
         prediction = np.transpose(prediction, (1, 2, 0))
         render = np.transpose(render, (1, 2, 0))
         loss = (loss - loss.min()) / (loss.max() - loss.min())
-        f, axarr = plt.subplots(1, 4, figsize=(4, 6))
+        f, axarr = plt.subplots(1, 5, figsize=(4, 6))
         axarr[0].imshow(render + 0.5)
         axarr[0].axis('off')
         axarr[1].imshow(texture + 0.5)
@@ -94,6 +95,21 @@ class TextureMapPredictorModule(pl.LightningModule):
         axarr[2].axis('off')
         axarr[3].imshow(loss, cmap='jet')
         axarr[3].axis('off')
+        closest_plotted = False
+        closest_train = Path(self.hparams.dataset.data_dir) / 'splits' / self.hparams.dataset.name / 'closest_train.json'
+        if closest_train.exists():
+            closest_train_dict = json.loads(closest_train.read_text())
+            if name in closest_train_dict:
+                texture_path = self.train_dataset.path_to_dataset / closest_train_dict[name] / "surface_texture.png"
+                if texture_path.exists():
+                    with Image.open(texture_path) as texture_im:
+                        closest = TextureMapDataset.process_to_padded_thumbnail(texture_im, self.train_dataset.texture_map_size) / 255 - 0.5
+                    axarr[4].imshow(closest + 0.5)
+                    axarr[4].axis('off')
+                    closest_plotted = True
+        if not closest_plotted:
+            axarr[4].imshow(np.zeros_like(loss), cmap='binary')
+            axarr[4].axis('off')
         plt.savefig(save_dir / "figures" / f"{name}_{v_idx}.jpg", bbox_inches='tight', dpi=240)
         plt.close()
         obj_text = Path(self.hparams.dataset.data_dir, self.hparams.dataset.mesh_dir, name, "normalized_model.obj").read_text()

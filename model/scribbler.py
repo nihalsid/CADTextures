@@ -249,6 +249,114 @@ class ImageFusionScribbler(nn.Module):
         return self.tanh(x) * 0.5
 
 
+class ImageFusionScribblerSlim(nn.Module):
+
+    def __init__(self, input_nc, input_nc_image, output_nc, ngf, ngf_image):
+        super().__init__()
+        norm = lambda c: nn.GroupNorm(4, c)
+        # noinspection PyTypeChecker
+        self.image_features = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(input_nc_image, ngf_image, 3, 2, 1),
+                norm(ngf_image),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                nn.Conv2d(ngf_image, ngf_image * 2, 3, 2, 1),
+                norm(ngf_image * 2),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                nn.Conv2d(ngf_image * 2, ngf_image * 4, 3, 2, 1),
+                norm(ngf_image * 4),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                nn.Conv2d(ngf_image * 4, ngf_image * 4, 3, 2, 1),
+                norm(ngf_image * 4),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                nn.Conv2d(ngf_image * 4, ngf_image * 8, 3, 2, 1),
+                norm(ngf_image * 8),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                nn.Conv2d(ngf_image * 8, ngf_image * 8, 3, 2, 1),
+                norm(ngf_image * 8),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                nn.Conv2d(ngf_image * 8, ngf_image * 8, 4, 1, 0),
+                norm(ngf_image * 8),
+                nn.ReLU(True),
+            )
+        ])
+        # noinspection PyTypeChecker
+        self.map_features = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(input_nc, ngf, 3, 1, 1),
+                norm(ngf),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                nn.Conv2d(ngf, ngf * 2, 3, 2, 1),
+                norm(ngf * 2),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                nn.Conv2d(ngf * 2, ngf * 4, 3, 2, 1),
+                norm(ngf * 4),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                nn.Conv2d(ngf * 4, ngf * 8, 3, 2, 1),
+                norm(ngf * 8),
+                nn.ReLU(True),
+            ),
+        ])
+        # noinspection PyTypeChecker
+        self.fusion = nn.Sequential(
+            nn.Conv2d(ngf * 8 + ngf_image * 8, ngf * 8, 3, 1, 1),
+            norm(ngf * 8),
+            nn.ReLU(True),
+        )
+        # noinspection PyTypeChecker
+        self.decoder = nn.ModuleList([
+            nn.Sequential(
+                UpsamplingBlock(ngf * 8, ngf * 4, 3, 1, 1),
+                norm(ngf * 4),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 4, ngf * 2, 3, 1, 1),
+                norm(ngf * 2),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 2, ngf, 3, 1, 1),
+                norm(ngf),
+                nn.ReLU(True),
+            ),
+            nn.Conv2d(ngf, 3, output_nc, 1, 1)
+        ])
+        self.tanh = nn.Tanh()
+
+    def fuse_features(self, input_maps, *condition):
+        image = condition[0]
+        map_features = nn.Sequential(*self.map_features)(input_maps)
+        image_features = nn.Sequential(*self.image_features)(image)
+        x = torch.cat([map_features, image_features.expand(-1, -1, map_features.shape[-2], -1).expand(-1, -1, -1, map_features.shape[-1])], dim=1)
+        return self.fusion(x)
+
+    def forward(self, input_maps, *condition):
+        image = condition[0]
+        x = self.fuse_features(input_maps, image)
+        for module in self.decoder:
+            x = module(x)
+        return self.tanh(x) * 0.5
+
+
 class ImageAnd3dFusionScribbler(ImageFusionScribbler):
 
     def __init__(self, input_nc, input_nc_image, output_nc, ngf, ngf_image, ngf_3d):
@@ -328,6 +436,10 @@ def get_model(config):
     if 'noc_render' in config.inputs:
         render_channels += 3
     if 'distance_field' in config.inputs:
+        if config.model.slim:
+            raise NotImplementedError
         return ImageAnd3dFusionScribbler(map_channels, render_channels, 3, config.model.input_texture_ngf, config.model.render_ngf, config.model.df_ngf)
     else:
+        if config.model.slim:
+            return ImageFusionScribblerSlim(map_channels, render_channels, 3, config.model.input_texture_ngf, config.model.render_ngf)
         return ImageFusionScribbler(map_channels, render_channels, 3, config.model.input_texture_ngf, config.model.render_ngf)
