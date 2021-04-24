@@ -22,7 +22,7 @@ def create_cube_models_from_base():
 
 def create_textured_cube_models_from_base():
     base_folder = "data/SingleShape-model/CubeTextures/base"
-    items = list(Path(base_folder, "train").iterdir()) + list(Path(base_folder, "val").iterdir())
+    items = list(Path(base_folder, 'textures', "train").iterdir()) + list(Path(base_folder, 'textures', "val").iterdir())
     all_samples = []
     for item in tqdm(items):
         all_samples.append(f"{'.'.join(item.name.split('.')[:-1])}")
