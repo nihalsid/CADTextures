@@ -1,0 +1,9 @@
+# @package _group_
+name: 'SingleShape/CubeSingleTexture'
+preload: True
+views_per_shape: 24
+data_dir: 'data'
+splits_dir: 'overfit_001'
+texture_map_size: 384
+render_size: 256
+mesh_dir: 'SingleShape-model/CubeSingleTexture'

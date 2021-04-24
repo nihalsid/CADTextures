@@ -20,6 +20,20 @@ def create_cube_models_from_base():
         Image.new('RGB', (384, 384), (c[0], c[1], c[2])).save(output_folder / "texture.png")
 
 
+def create_textured_cube_models_from_base():
+    base_folder = "data/SingleShape-model/CubeTextures/base"
+    items = list(Path(base_folder, "train").iterdir()) + list(Path(base_folder, "val").iterdir())
+    all_samples = []
+    for item in tqdm(items):
+        all_samples.append(f"{'.'.join(item.name.split('.')[:-1])}")
+        output_folder = Path(base_folder).parent / f"{'.'.join(item.name.split('.')[:-1])}"
+        output_folder.mkdir(exist_ok=True)
+        for o in ["material.mtl", "normalized_model.obj"]:
+            copyfile(Path(base_folder) / o, output_folder / o)
+        copyfile(item, output_folder / "texture.png")
+    write_list('data/splits/SingleShape/CubeTextures/official/all.txt', all_samples)
+
+
 def create_cube_models_single_texture_from_base():
     target_folder = "data/SingleShape-model/CubeSingleTexture02"
     base_folder = "data/SingleShape-model/Cube/base"
@@ -81,5 +95,4 @@ def create_split():
 
 
 if __name__ == "__main__":
-    create_cube_models_single_texture_from_base()
-    # create_split()
+    create_textured_cube_models_from_base()
