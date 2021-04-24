@@ -3,6 +3,7 @@ from pathlib import Path
 from PIL import Image
 from tqdm import tqdm
 import numpy as np
+import random
 import json
 
 from util.misc import read_list, write_list
@@ -94,5 +95,17 @@ def create_split():
     write_list('data/splits/SingleShape/Cube/official/train_vis.txt', read_list('data/splits/SingleShape/Cube/official/train.txt')[:16])
 
 
+def create_split_cubetextures():
+    base_folder = "data/SingleShape-model/CubeTextures/base"
+    for split in ['train', 'val']:
+        items = list(x.name for x in Path(base_folder, 'textures', split).iterdir())
+        write_list(f'data/splits/SingleShape/CubeTextures/official/{split}.txt', items)
+    val = read_list('data/splits/SingleShape/CubeTextures/official/val.txt')
+    write_list('data/splits/SingleShape/CubeTextures/official/val_vis.txt', random.sample(val, 50))
+    train = read_list('data/splits/SingleShape/CubeTextures/official/train.txt')
+    write_list('data/splits/SingleShape/CubeTextures/official/train_vis.txt', random.sample(train, 25))
+    write_list('data/splits/SingleShape/CubeTextures/official/train_val.txt', random.sample(train, int(len(train) * 0.20)))
+
+
 if __name__ == "__main__":
-    create_textured_cube_models_from_base()
+    create_split_cubetextures()

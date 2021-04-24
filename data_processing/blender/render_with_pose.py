@@ -148,8 +148,11 @@ bpy.context.scene.render.image_settings.color_depth = '8'
 
 radius = 2.25
 
-phis = list(range(0, 360, 45))
-thetas = list(range(25, 90, 30))
+#phis = list(range(0, 360, 45))
+#thetas = list(range(25, 90, 30))
+
+phis = list(range(0, 360, 60))
+thetas = list(range(25, 85, 30))
 
 
 def add_light(name, location):
