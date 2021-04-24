@@ -98,7 +98,7 @@ def create_split():
 def create_split_cubetextures():
     base_folder = "data/SingleShape-model/CubeTextures/base"
     for split in ['train', 'val']:
-        items = list(x.name for x in Path(base_folder, 'textures', split).iterdir())
+        items = list('.'.join(x.name.split('.')[:-1]) for x in Path(base_folder, 'textures', split).iterdir())
         write_list(f'data/splits/SingleShape/CubeTextures/official/{split}.txt', items)
     val = read_list('data/splits/SingleShape/CubeTextures/official/val.txt')
     write_list('data/splits/SingleShape/CubeTextures/official/val_vis.txt', random.sample(val, 50))
