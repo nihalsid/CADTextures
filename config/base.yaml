@@ -1,5 +1,5 @@
 defaults:
-  - dataset: future_sofa
+  - dataset: single_cube_1texture
   - inputs: all
   - model: base
 
