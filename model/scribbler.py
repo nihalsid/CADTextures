@@ -431,6 +431,8 @@ def get_model(config):
     render_channels = 4
     if 'noc' in config.inputs:
         map_channels += 3
+    if 'partial_texture' in config.inputs:
+        map_channels += 3
     if 'normal' in config.inputs:
         map_channels += 3
     if 'noc_render' in config.inputs:

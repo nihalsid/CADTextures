@@ -1,3 +1,4 @@
+from argparse import ArgumentParser
 from shutil import copyfile
 from pathlib import Path
 from PIL import Image
@@ -107,12 +108,12 @@ def create_split_cubetextures():
     write_list('data/splits/SingleShape/CubeTextures/official/train_val.txt', random.sample(train, int(len(train) * 0.20)))
 
 
-def create_partial_textures():
+def create_partial_textures(dataset, num_views, proc, num_proc):
     from scipy.spatial import cKDTree
-    num_views = 24
-    dataset_0, dataset_1 = "SingleShape/CubeSingleTexture".split('/')
+    dataset_0, dataset_1 = dataset.split('/')
     folder = Path(f"data/{dataset_0}/{dataset_1}")
     all_list = read_list(f'data/splits/{dataset_0}/{dataset_1}/official/all.txt')
+    all_list = [x for i, x in enumerate(all_list) if i % num_proc == proc]
 
     with Image.open(folder / all_list[0] / f"noc.png") as noc_img:
         noc = np.array(noc_img)[:, :, :3]
@@ -125,25 +126,36 @@ def create_partial_textures():
     kd_tree = cKDTree(noc_flat)
 
     for sample in tqdm(all_list):
-        for i in range(num_views):
-            with Image.open(folder / sample / f"rgb_{i:03d}.png") as render_img:
-                render = np.array(render_img)[:, :, :3]
-            with Image.open(folder / sample / f"noc_render_{i:03d}.png") as noc_render_img:
-                noc_render = np.array(noc_render_img)[:, :, :3]
-            with Image.open(folder / sample / f"silhoutte_{i:03d}.png") as mask_render_img:
-                mask_render = np.array(mask_render_img)
-                mask_render = np.logical_and(np.logical_and(mask_render[:, :, 0] < 50, mask_render[:, :, 1] < 50), mask_render[:, :, 2] < 50)
-            render_flat = render.reshape((-1, 3))
-            noc_render_flat = noc_render.reshape((-1, 3))
-            mask_render_flat = mask_render.squeeze().ravel()
-            render_flat = render_flat[mask_render_flat, :]
-            noc_render_flat = noc_render_flat[mask_render_flat, :]
-            _dist, indices = kd_tree.query(noc_render_flat, k=1)
-            closest_indices = indices_noc_flat[indices]
-            partial_texture = np.zeros_like(noc).reshape((-1, 3))
-            partial_texture[closest_indices, :] = render_flat
-            Image.fromarray(partial_texture.reshape(noc.shape)).save(folder / sample / f"partial_texture_{i:03d}.png")
+        if (folder / sample / "surface_texture.png").exists():
+            for i in range(num_views):
+                with Image.open(folder / sample / f"rgb_{i:03d}.png") as render_img:
+                    render = np.array(render_img)[:, :, :3]
+                with Image.open(folder / sample / f"noc_render_{i:03d}.png") as noc_render_img:
+                    noc_render = np.array(noc_render_img)[:, :, :3]
+                with Image.open(folder / sample / f"silhoutte_{i:03d}.png") as mask_render_img:
+                    mask_render = np.array(mask_render_img)
+                    mask_render = np.logical_and(np.logical_and(mask_render[:, :, 0] < 50, mask_render[:, :, 1] < 50), mask_render[:, :, 2] < 50)
+                render_flat = render.reshape((-1, 3))
+                noc_render_flat = noc_render.reshape((-1, 3))
+                mask_render_flat = mask_render.squeeze().ravel()
+                render_flat = render_flat[mask_render_flat, :]
+                noc_render_flat = noc_render_flat[mask_render_flat, :]
+                _dist, indices = kd_tree.query(noc_render_flat, k=1)
+                closest_indices = indices_noc_flat[indices]
+                partial_texture = np.zeros_like(noc).reshape((-1, 3))
+                partial_texture[closest_indices, :] = render_flat
+                Image.fromarray(partial_texture.reshape(noc.shape)).save(folder / sample / f"partial_texture_{i:03d}.png")
+
+
+def run_partial_texture_proc():
+    parser = ArgumentParser()
+    parser.add_argument('--dataset', default='3D-FUTURE/Sofa', type=str)
+    parser.add_argument('--num_views', default=24, type=int)
+    parser.add_argument('--num_proc', default=1, type=int)
+    parser.add_argument('--proc', default=0, type=int)
+    args = parser.parse_args()
+    create_partial_textures(args.dataset, args.num_views, args.proc, args.num_proc)
 
 
 if __name__ == "__main__":
-    create_partial_textures()
+    run_partial_texture_proc()

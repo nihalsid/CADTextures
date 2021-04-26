@@ -27,6 +27,8 @@ class TextureMapPredictorModule(pl.LightningModule):
         condition = [torch.cat([batch['render'], batch['mask_render']], dim=1), ]
         if 'noc' in self.hparams.inputs:
             input_maps = torch.cat([input_maps, batch['noc']], dim=1)
+        if 'partial_texture' in self.hparams.inputs:
+            input_maps = torch.cat([input_maps, batch['partial_texture']], dim=1)
         if 'noc_render' in self.hparams.inputs:
             condition[0] = torch.cat([condition[0], batch['noc_render']], dim=1)
         if 'normal' in self.hparams.inputs:
@@ -67,7 +69,7 @@ class TextureMapPredictorModule(pl.LightningModule):
                     predicted_texture = self.forward(batch)
                     loss = self.loss(batch['texture'], predicted_texture, batch['mask_texture']).mean(axis=1).squeeze(1)
                     for ii in range(predicted_texture.shape[0]):
-                        self.visualize_prediction(output_vis_path, batch['name'][ii], batch['view_index'][ii], batch['texture'][ii].cpu().numpy(), batch['render'][ii].cpu().numpy(), predicted_texture[ii].cpu().numpy(), loss[ii].cpu().numpy())
+                        self.visualize_prediction(output_vis_path, batch['name'][ii], batch['view_index'][ii], batch['texture'][ii].cpu().numpy(), batch['render'][ii].cpu().numpy(), batch['partial_texture'][ii].cpu().numpy(), predicted_texture[ii].cpu().numpy(), loss[ii].cpu().numpy())
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(list(self.model.parameters()), lr=self.hparams.lr)
@@ -80,21 +82,24 @@ class TextureMapPredictorModule(pl.LightningModule):
         return [torch.utils.data.DataLoader(self.val_dataset, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, pin_memory=True, drop_last=False),
                 torch.utils.data.DataLoader(self.train_val_dataset, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, pin_memory=True, drop_last=False)]
 
-    def visualize_prediction(self, save_dir, name, v_idx, texture, render, prediction, loss):
+    def visualize_prediction(self, save_dir, name, v_idx, texture, render, partial_texture, prediction, loss):
         import matplotlib.pyplot as plt
         texture = np.transpose(texture, (1, 2, 0))
         prediction = np.transpose(prediction, (1, 2, 0))
         render = np.transpose(render, (1, 2, 0))
+        partial_texture = np.transpose(partial_texture, (1, 2, 0))
         loss = (loss - loss.min()) / (loss.max() - loss.min())
-        f, axarr = plt.subplots(1, 5, figsize=(4, 6))
+        f, axarr = plt.subplots(1, 6, figsize=(4, 6))
         axarr[0].imshow(render + 0.5)
         axarr[0].axis('off')
-        axarr[1].imshow(texture + 0.5)
+        axarr[1].imshow(partial_texture + 0.5)
         axarr[1].axis('off')
-        axarr[2].imshow(prediction + 0.5)
+        axarr[2].imshow(texture + 0.5)
         axarr[2].axis('off')
-        axarr[3].imshow(loss, cmap='jet')
+        axarr[3].imshow(prediction + 0.5)
         axarr[3].axis('off')
+        axarr[4].imshow(loss, cmap='jet')
+        axarr[4].axis('off')
         closest_plotted = False
         closest_train = Path(self.hparams.dataset.data_dir) / 'splits' / self.hparams.dataset.name / 'closest_train.json'
         if closest_train.exists():
@@ -104,8 +109,8 @@ class TextureMapPredictorModule(pl.LightningModule):
                 if texture_path.exists():
                     with Image.open(texture_path) as texture_im:
                         closest = TextureMapDataset.process_to_padded_thumbnail(texture_im, self.train_dataset.texture_map_size) / 255 - 0.5
-                    axarr[4].imshow(closest + 0.5)
-                    axarr[4].axis('off')
+                    axarr[5].imshow(closest + 0.5)
+                    axarr[5].axis('off')
                     closest_plotted = True
         if not closest_plotted:
             axarr[4].imshow(np.zeros_like(loss), cmap='binary')
