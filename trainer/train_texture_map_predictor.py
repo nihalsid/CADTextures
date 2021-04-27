@@ -42,12 +42,12 @@ class TextureMapPredictorModule(pl.LightningModule):
         return predicted_texture
 
     @staticmethod
-    def loss(target, prediction, weights):
+    def loss_l1(target, prediction, weights):
         return torch.abs(prediction - target) * weights.expand(-1, target.shape[1], -1, -1)
 
     def training_step(self, batch, batch_index):
         predicted_texture = self.forward(batch)
-        loss = self.loss(batch['texture'], predicted_texture, batch['mask_texture']).mean()
+        loss = self.loss_l1(batch['texture'], predicted_texture, batch['mask_texture']).mean()
         self.log('train/loss_l1', loss, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
         return {'loss': loss}
 
@@ -55,7 +55,7 @@ class TextureMapPredictorModule(pl.LightningModule):
         split = ["val", "train"][dataloader_index]
         suffix = ["", "_epoch"][dataloader_index]
         predicted_texture = self.forward(batch)
-        loss = self.loss(batch['texture'], predicted_texture, batch['mask_texture']).mean()
+        loss = self.loss_l1(batch['texture'], predicted_texture, batch['mask_texture']).mean()
         self.log(f'{split}/loss_l1{suffix}', loss, on_step=False, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
 
     def validation_epoch_end(self, _outputs):
@@ -70,7 +70,7 @@ class TextureMapPredictorModule(pl.LightningModule):
                 for batch_idx, batch in enumerate(loader):
                     TextureMapDataset.move_batch_to_gpu(batch, self.device)
                     predicted_texture = self.forward(batch)
-                    loss = self.loss(batch['texture'], predicted_texture, batch['mask_texture']).mean(axis=1).squeeze(1)
+                    loss = self.loss_l1(batch['texture'], predicted_texture, batch['mask_texture']).mean(axis=1).squeeze(1)
                     for ii in range(predicted_texture.shape[0]):
                         self.visualize_prediction(output_vis_path, batch['name'][ii], batch['view_index'][ii], batch['texture'][ii].cpu().numpy(), batch['render'][ii].cpu().numpy(), batch['partial_texture'][ii].cpu().numpy(), predicted_texture[ii].cpu().numpy(), loss[ii].cpu().numpy())
 
