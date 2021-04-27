@@ -10,6 +10,7 @@ import json
 
 from dataset.texture_map_dataset import TextureMapDataset
 from model.scribbler import get_model
+from util.feature_loss import FeatureLossEvaluator
 
 
 class TextureMapPredictorModule(pl.LightningModule):
@@ -17,12 +18,14 @@ class TextureMapPredictorModule(pl.LightningModule):
     def __init__(self, config):
         super(TextureMapPredictorModule, self).__init__()
         self.hparams = config
-        dataset = lambda split: TextureMapDataset(config, split)
+        self.preload_dict = {}
+        dataset = lambda split: TextureMapDataset(config, split, self.preload_dict)
         self.train_dataset, self.val_dataset, self.train_val_dataset, self.train_vis_dataset, self.val_vis_dataset = dataset('train'), dataset('val'), dataset('train_val'), dataset('train_vis'), dataset('val_vis')
         self.model = get_model(config)
+        self.feature_evaluator = FeatureLossEvaluator()
 
     def forward(self, batch):
-        TextureMapDataset.apply_batch_transforms(batch)
+        self.train_dataset.apply_batch_transforms(batch)
         input_maps = batch['mask_texture']
         condition = [torch.cat([batch['render'], batch['mask_render']], dim=1), ]
         if 'noc' in self.hparams.inputs:
@@ -84,20 +87,13 @@ class TextureMapPredictorModule(pl.LightningModule):
 
     def visualize_prediction(self, save_dir, name, v_idx, texture, render, partial_texture, prediction, loss):
         import matplotlib.pyplot as plt
-        texture = np.transpose(texture, (1, 2, 0))
-        prediction = np.transpose(prediction, (1, 2, 0))
-        render = np.transpose(render, (1, 2, 0))
-        partial_texture = np.transpose(partial_texture, (1, 2, 0))
+        [texture, prediction, render, partial_texture], _, _ = self.train_dataset.convert_data_for_visualization([texture, prediction, render, partial_texture], [], [])
         loss = (loss - loss.min()) / (loss.max() - loss.min())
         f, axarr = plt.subplots(1, 6, figsize=(4, 6))
-        axarr[0].imshow(render + 0.5)
-        axarr[0].axis('off')
-        axarr[1].imshow(partial_texture + 0.5)
-        axarr[1].axis('off')
-        axarr[2].imshow(texture + 0.5)
-        axarr[2].axis('off')
-        axarr[3].imshow(prediction + 0.5)
-        axarr[3].axis('off')
+        items = [render, partial_texture, texture, prediction]
+        for i in range(4):
+            axarr[i].imshow(items[i])
+            axarr[i].axis('off')
         axarr[4].imshow(loss, cmap='jet')
         axarr[4].axis('off')
         closest_plotted = False
@@ -108,13 +104,13 @@ class TextureMapPredictorModule(pl.LightningModule):
                 texture_path = self.train_dataset.path_to_dataset / closest_train_dict[name] / "surface_texture.png"
                 if texture_path.exists():
                     with Image.open(texture_path) as texture_im:
-                        closest = TextureMapDataset.process_to_padded_thumbnail(texture_im, self.train_dataset.texture_map_size) / 255 - 0.5
-                    axarr[5].imshow(closest + 0.5)
+                        closest = TextureMapDataset.process_to_padded_thumbnail(texture_im, self.train_dataset.texture_map_size) / 255
+                    axarr[5].imshow(closest)
                     axarr[5].axis('off')
                     closest_plotted = True
         if not closest_plotted:
-            axarr[4].imshow(np.zeros_like(loss), cmap='binary')
-            axarr[4].axis('off')
+            axarr[5].imshow(np.zeros_like(loss), cmap='binary')
+            axarr[5].axis('off')
         plt.savefig(save_dir / "figures" / f"{name}_{v_idx}.jpg", bbox_inches='tight', dpi=240)
         plt.close()
         obj_text = Path(self.hparams.dataset.data_dir, self.hparams.dataset.mesh_dir, name, "normalized_model.obj").read_text()
@@ -128,8 +124,8 @@ class TextureMapPredictorModule(pl.LightningModule):
         Path(save_dir / "meshes" / f"{name}_pred.obj").write_text(pred_obj_text)
         Path(save_dir / "meshes" / f"{name}_gt.mtl").write_text(gt_mtl_text)
         Path(save_dir / "meshes" / f"{name}_pred.mtl").write_text(pred_mtl_text)
-        Image.fromarray(((texture + 0.5) * 255).astype(np.uint8)).save(save_dir / "meshes" / f"{name}_gt.jpg")
-        Image.fromarray(((prediction + 0.5) * 255).astype(np.uint8)).save(save_dir / "meshes" / f"{name}_pred.jpg")
+        Image.fromarray((texture * 255).astype(np.uint8)).save(save_dir / "meshes" / f"{name}_gt.jpg")
+        Image.fromarray((prediction * 255).astype(np.uint8)).save(save_dir / "meshes" / f"{name}_pred.jpg")
 
 
 @hydra.main(config_path='../config', config_name='base')

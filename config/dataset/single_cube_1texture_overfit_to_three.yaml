@@ -7,3 +7,4 @@ splits_dir: 'overfit_003'
 texture_map_size: 384
 render_size: 256
 mesh_dir: 'SingleShape-model/CubeSingleTexture'
+color_space: lab

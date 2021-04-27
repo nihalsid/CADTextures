@@ -7,3 +7,4 @@ splits_dir: 'official'
 texture_map_size: 384
 render_size: 256
 mesh_dir: '3D-FUTURE-model/Sofa'
+color_space: lab

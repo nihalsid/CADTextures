@@ -19,14 +19,14 @@ def test_texture_map_dataset(config, visualize):
         for batch_idx, batch in enumerate(tqdm(dataloader)):
             dataset.apply_batch_transforms(batch)
             for ii in range(batch['texture'].shape[0]):
-                TextureMapDataset.visualize_sample_pyplot(batch['texture'][ii].numpy(), batch['normal'][ii].numpy(), batch['noc'][ii].numpy(),
-                                                          batch['mask_texture'][ii].numpy(), batch['render'][ii].numpy(), batch['noc_render'][ii].numpy(), batch['mask_render'][ii].numpy(), batch['partial_texture'][ii].numpy())
+                dataset.visualize_sample_pyplot(batch['texture'][ii].numpy(), batch['normal'][ii].numpy(), batch['noc'][ii].numpy(),
+                                                batch['mask_texture'][ii].numpy(), batch['render'][ii].numpy(), batch['noc_render'][ii].numpy(), batch['mask_render'][ii].numpy(), batch['partial_texture'][ii].numpy())
 
 
 @hydra.main(config_path='../config', config_name='base')
 def main_app(config):
     test_texture_map_dataset(config, True)
 
-    
+
 if __name__ == '__main__':
     main_app()
