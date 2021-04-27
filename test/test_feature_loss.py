@@ -1,14 +1,13 @@
 import torch
 from torchvision import transforms
 from PIL import Image
-import numpy as np
 import matplotlib.pyplot as plt
 
 from util.feature_loss import FeatureLossHelper
 
 
 def test_feature_loss():
-    imsize = 512
+    imsize = 128
 
     loader = transforms.Compose([
         transforms.Resize(imsize),
@@ -41,7 +40,7 @@ def test_feature_loss():
         optimizer = torch.optim.Adam([_input_img.requires_grad_()], lr=0.01)
         return optimizer
 
-    feature_loss_helper = FeatureLossHelper()
+    feature_loss_helper = FeatureLossHelper(['relu4_2'])
     feature_loss_helper.move_to_device(torch.device('cuda:0'))
 
     def run_style_transfer(content_img, input_img, num_steps=300):
@@ -53,7 +52,7 @@ def test_feature_loss():
             def closure():
                 input_img.data.clamp_(0, 1)
                 optimizer.zero_grad()
-                loss = feature_loss_helper.calculate_feature_loss(content_img, input_img, weights)
+                loss = feature_loss_helper.calculate_feature_loss(content_img, input_img, weights).mean()
                 loss.backward()
                 run[0] += 1
                 if run[0] % 50 == 0:

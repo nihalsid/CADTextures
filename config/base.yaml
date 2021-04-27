@@ -17,6 +17,8 @@ resume: null
 batch_size: 8
 num_workers: 8
 lr: 0.0001
+lambda_l1: 1
+lambda_content: 0.005
 
 hydra:
   output_subdir: null # Disable saving of config files. We'll do that ourselves.

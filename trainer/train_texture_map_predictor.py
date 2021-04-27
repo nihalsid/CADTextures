@@ -10,7 +10,7 @@ import json
 
 from dataset.texture_map_dataset import TextureMapDataset
 from model.scribbler import get_model
-from util.feature_loss import FeatureLossEvaluator
+from util.feature_loss import FeatureLossHelper
 
 
 class TextureMapPredictorModule(pl.LightningModule):
@@ -22,7 +22,7 @@ class TextureMapPredictorModule(pl.LightningModule):
         dataset = lambda split: TextureMapDataset(config, split, self.preload_dict)
         self.train_dataset, self.val_dataset, self.train_val_dataset, self.train_vis_dataset, self.val_vis_dataset = dataset('train'), dataset('val'), dataset('train_val'), dataset('train_vis'), dataset('val_vis')
         self.model = get_model(config)
-        self.feature_evaluator = FeatureLossEvaluator()
+        self.feature_loss_helper = FeatureLossHelper(['relu4_2'])
 
     def forward(self, batch):
         self.train_dataset.apply_batch_transforms(batch)
@@ -47,16 +47,24 @@ class TextureMapPredictorModule(pl.LightningModule):
 
     def training_step(self, batch, batch_index):
         predicted_texture = self.forward(batch)
-        loss = self.loss_l1(batch['texture'], predicted_texture, batch['mask_texture']).mean()
-        self.log('train/loss_l1', loss, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
-        return {'loss': loss}
+        loss_l1 = self.loss_l1(batch['texture'], predicted_texture, batch['mask_texture']).mean()
+        loss_content = self.feature_loss_helper.calculate_feature_loss(batch['texture'], predicted_texture, batch['mask_texture']).mean()
+        loss_total = loss_l1 * self.hparams.lambda_l1 + loss_content * self.hparams.lambda_content
+        self.log('train/loss_l1', loss_l1, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
+        self.log('train/loss_content', loss_content, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
+        self.log('train/loss_total', loss_total, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
+        return {'loss': loss_total}
 
     def validation_step(self, batch, batch_index, dataloader_index):
         split = ["val", "train"][dataloader_index]
         suffix = ["", "_epoch"][dataloader_index]
         predicted_texture = self.forward(batch)
-        loss = self.loss_l1(batch['texture'], predicted_texture, batch['mask_texture']).mean()
-        self.log(f'{split}/loss_l1{suffix}', loss, on_step=False, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
+        loss_l1 = self.loss_l1(batch['texture'], predicted_texture, batch['mask_texture']).mean()
+        loss_content = self.feature_loss_helper.calculate_feature_loss(batch['texture'], predicted_texture, batch['mask_texture']).mean()
+        loss_total = loss_l1 * self.hparams.lambda_l1 + loss_content * self.hparams.lambda_content
+        self.log(f'{split}/loss_l1{suffix}', loss_l1, on_step=False, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
+        self.log(f'{split}/loss_content{suffix}', loss_content, on_step=False, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
+        self.log(f'{split}/loss_total{suffix}', loss_total, on_step=False, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
 
     def validation_epoch_end(self, _outputs):
         if int(os.environ.get('LOCAL_RANK', 0)) == 0:
@@ -70,9 +78,10 @@ class TextureMapPredictorModule(pl.LightningModule):
                 for batch_idx, batch in enumerate(loader):
                     TextureMapDataset.move_batch_to_gpu(batch, self.device)
                     predicted_texture = self.forward(batch)
-                    loss = self.loss_l1(batch['texture'], predicted_texture, batch['mask_texture']).mean(axis=1).squeeze(1)
+                    loss_l1 = self.loss_l1(batch['texture'], predicted_texture, batch['mask_texture']).mean(axis=1).squeeze(1)
+                    loss_content = self.feature_loss_helper.calculate_feature_loss(batch['texture'], predicted_texture, batch['mask_texture']).mean(axis=1).squeeze(1)
                     for ii in range(predicted_texture.shape[0]):
-                        self.visualize_prediction(output_vis_path, batch['name'][ii], batch['view_index'][ii], batch['texture'][ii].cpu().numpy(), batch['render'][ii].cpu().numpy(), batch['partial_texture'][ii].cpu().numpy(), predicted_texture[ii].cpu().numpy(), loss[ii].cpu().numpy())
+                        self.visualize_prediction(output_vis_path, batch['name'][ii], batch['view_index'][ii], batch['texture'][ii].cpu().numpy(), batch['render'][ii].cpu().numpy(), batch['partial_texture'][ii].cpu().numpy(), predicted_texture[ii].cpu().numpy(), loss_l1[ii].cpu().numpy(), loss_content[ii].cpu().numpy())
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(list(self.model.parameters()), lr=self.hparams.lr)
@@ -85,17 +94,20 @@ class TextureMapPredictorModule(pl.LightningModule):
         return [torch.utils.data.DataLoader(self.val_dataset, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, pin_memory=True, drop_last=False),
                 torch.utils.data.DataLoader(self.train_val_dataset, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, pin_memory=True, drop_last=False)]
 
-    def visualize_prediction(self, save_dir, name, v_idx, texture, render, partial_texture, prediction, loss):
+    def visualize_prediction(self, save_dir, name, v_idx, texture, render, partial_texture, prediction, loss_l1, loss_content):
         import matplotlib.pyplot as plt
         [texture, prediction, render, partial_texture], _, _ = self.train_dataset.convert_data_for_visualization([texture, prediction, render, partial_texture], [], [])
-        loss = (loss - loss.min()) / (loss.max() - loss.min())
-        f, axarr = plt.subplots(1, 6, figsize=(4, 6))
+        loss_l1 = (loss_l1 - loss_l1.min()) / (loss_l1.max() - loss_l1.min())
+        loss_content = (loss_content - loss_content.min()) / (loss_content.max() - loss_content.min())
+        f, axarr = plt.subplots(1, 7, figsize=(4, 6))
         items = [render, partial_texture, texture, prediction]
         for i in range(4):
             axarr[i].imshow(items[i])
             axarr[i].axis('off')
-        axarr[4].imshow(loss, cmap='jet')
+        axarr[4].imshow(loss_l1, cmap='jet')
         axarr[4].axis('off')
+        axarr[5].imshow(loss_content, cmap='jet')
+        axarr[5].axis('off')
         closest_plotted = False
         closest_train = Path(self.hparams.dataset.data_dir) / 'splits' / self.hparams.dataset.name / 'closest_train.json'
         if closest_train.exists():
@@ -105,12 +117,12 @@ class TextureMapPredictorModule(pl.LightningModule):
                 if texture_path.exists():
                     with Image.open(texture_path) as texture_im:
                         closest = TextureMapDataset.process_to_padded_thumbnail(texture_im, self.train_dataset.texture_map_size) / 255
-                    axarr[5].imshow(closest)
-                    axarr[5].axis('off')
+                    axarr[6].imshow(closest)
+                    axarr[6].axis('off')
                     closest_plotted = True
         if not closest_plotted:
-            axarr[5].imshow(np.zeros_like(loss), cmap='binary')
-            axarr[5].axis('off')
+            axarr[6].imshow(np.zeros_like(loss_l1), cmap='binary')
+            axarr[6].axis('off')
         plt.savefig(save_dir / "figures" / f"{name}_{v_idx}.jpg", bbox_inches='tight', dpi=240)
         plt.close()
         obj_text = Path(self.hparams.dataset.data_dir, self.hparams.dataset.mesh_dir, name, "normalized_model.obj").read_text()
@@ -126,6 +138,9 @@ class TextureMapPredictorModule(pl.LightningModule):
         Path(save_dir / "meshes" / f"{name}_pred.mtl").write_text(pred_mtl_text)
         Image.fromarray((texture * 255).astype(np.uint8)).save(save_dir / "meshes" / f"{name}_gt.jpg")
         Image.fromarray((prediction * 255).astype(np.uint8)).save(save_dir / "meshes" / f"{name}_pred.jpg")
+
+    def on_post_move_to_device(self):
+        self.feature_loss_helper.move_to_device(self.device)
 
 
 @hydra.main(config_path='../config', config_name='base')

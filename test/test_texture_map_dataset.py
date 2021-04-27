@@ -8,7 +8,7 @@ from util.timer import Timer
 
 
 def test_texture_map_dataset(config, visualize):
-    dataset = TextureMapDataset(config, 'train')
+    dataset = TextureMapDataset(config, 'train', {})
     print("Length of dataset:", len(dataset))
     dataloader = DataLoader(dataset, batch_size=4, shuffle=False, num_workers=4, pin_memory=True)
     with Timer('Dataloader'):

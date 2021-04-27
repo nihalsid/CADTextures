@@ -4,11 +4,11 @@ import torch
 
 class FeatureLossHelper:
 
-    def __init__(self):
+    def __init__(self, layers):
         model_vgg19 = vgg19(pretrained=True)
         model_vgg19.eval()
-        self.feature_extractor = FeatureExtractor(model_vgg19.features, ['relu4_2'])
-        self.criterion = torch.nn.MSELoss(reduction='mean')
+        self.feature_extractor = FeatureExtractor(model_vgg19.features, layers)
+        self.criterion = torch.nn.MSELoss(reduction='none')
 
     def move_to_device(self, device):
         self.feature_extractor.to(device)
@@ -37,11 +37,11 @@ class FeatureExtractor(torch.nn.Module):
 
     def __init__(self, submodule, extracted_layers):
         super(FeatureExtractor, self).__init__()
-        self.submodule = self.create_named_vgg(submodule)
         self.extracted_layers = extracted_layers
+        self.submodule = self.create_named_vgg(submodule, extracted_layers[-1])
 
     @staticmethod
-    def create_named_vgg(submodule):
+    def create_named_vgg(submodule, break_at):
         model = torch.nn.Sequential()
         i, j = 1, 1
         for layer in submodule.children():
@@ -60,6 +60,8 @@ class FeatureExtractor(torch.nn.Module):
             else:
                 raise RuntimeError('Unrecognized layer: {}'.format(layer.__class__.__name__))
             model.add_module(name, layer)
+            if name == break_at:
+                break
         return model
 
     def forward(self, x):
