@@ -1,6 +1,6 @@
 # @package _group_
 name: 'SingleShape/Cube'
-preload: True
+preload: False
 views_per_shape: 24
 data_dir: 'data'
 splits_dir: 'official'

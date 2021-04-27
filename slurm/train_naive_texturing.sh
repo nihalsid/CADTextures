@@ -9,6 +9,8 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=yawar.siddiqui@tum.de
 #SBATCH --exclude=char,pegasus,seti,tarsonis
+#SBATCH --partition=debug
+#SBATCH --qos=normal
 
 cd /rhome/ysiddiqui/CADTextures/
 
