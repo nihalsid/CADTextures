@@ -23,6 +23,7 @@ class TextureMapPredictorModule(pl.LightningModule):
         self.train_dataset, self.val_dataset, self.train_val_dataset, self.train_vis_dataset, self.val_vis_dataset = dataset('train'), dataset('val'), dataset('train_val'), dataset('train_vis'), dataset('val_vis')
         self.model = get_model(config)
         self.feature_loss_helper = FeatureLossHelper(['relu4_2'])
+        self.style_loss_helper = FeatureLossHelper(['relu3_2', 'relu4_2'])
 
     def forward(self, batch):
         self.train_dataset.apply_batch_transforms(batch)
@@ -45,13 +46,20 @@ class TextureMapPredictorModule(pl.LightningModule):
     def loss_l1(target, prediction, weights):
         return torch.abs(prediction - target) * weights.expand(-1, target.shape[1], -1, -1)
 
-    def training_step(self, batch, batch_index):
-        predicted_texture = self.forward(batch)
+    def calculate_losses(self, predicted_texture, batch):
         loss_l1 = self.loss_l1(batch['texture'], predicted_texture, batch['mask_texture']).mean()
         loss_content = self.feature_loss_helper.calculate_feature_loss(batch['texture'], predicted_texture, batch['mask_texture']).mean()
-        loss_total = loss_l1 * self.hparams.lambda_l1 + loss_content * self.hparams.lambda_content
+        style_loss_maps = self.style_loss_helper.calculate_style_loss(batch['texture'], predicted_texture, batch['mask_texture'])
+        loss_style = style_loss_maps[0].mean() + style_loss_maps[1].mean()
+        loss_total = loss_l1 * self.hparams.lambda_l1 + loss_content * self.hparams.lambda_content + loss_style * self.hparams.lambda_content
+        return loss_total, loss_l1, loss_content, loss_style
+
+    def training_step(self, batch, batch_index):
+        predicted_texture = self.forward(batch)
+        loss_total, loss_l1, loss_content, loss_style = self.calculate_losses(predicted_texture, batch)
         self.log('train/loss_l1', loss_l1, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
         self.log('train/loss_content', loss_content, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
+        self.log('train/loss_style', loss_style, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
         self.log('train/loss_total', loss_total, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
         return {'loss': loss_total}
 
@@ -59,11 +67,10 @@ class TextureMapPredictorModule(pl.LightningModule):
         split = ["val", "train"][dataloader_index]
         suffix = ["", "_epoch"][dataloader_index]
         predicted_texture = self.forward(batch)
-        loss_l1 = self.loss_l1(batch['texture'], predicted_texture, batch['mask_texture']).mean()
-        loss_content = self.feature_loss_helper.calculate_feature_loss(batch['texture'], predicted_texture, batch['mask_texture']).mean()
-        loss_total = loss_l1 * self.hparams.lambda_l1 + loss_content * self.hparams.lambda_content
+        loss_total, loss_l1, loss_content, loss_style = self.calculate_losses(predicted_texture, batch)
         self.log(f'{split}/loss_l1{suffix}', loss_l1, on_step=False, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
         self.log(f'{split}/loss_content{suffix}', loss_content, on_step=False, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
+        self.log(f'{split}/loss_style{suffix}', loss_style, on_step=False, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
         self.log(f'{split}/loss_total{suffix}', loss_total, on_step=False, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
 
     def validation_epoch_end(self, _outputs):
@@ -80,8 +87,10 @@ class TextureMapPredictorModule(pl.LightningModule):
                     predicted_texture = self.forward(batch)
                     loss_l1 = self.loss_l1(batch['texture'], predicted_texture, batch['mask_texture']).mean(axis=1).squeeze(1)
                     loss_content = self.feature_loss_helper.calculate_feature_loss(batch['texture'], predicted_texture, batch['mask_texture']).mean(axis=1).squeeze(1)
+                    style_loss_maps = self.style_loss_helper.calculate_style_loss(batch['texture'], predicted_texture, batch['mask_texture'])
+                    loss_style = (torch.nn.functional.interpolate(style_loss_maps[1], size=style_loss_maps[0].shape[2:]) + style_loss_maps[0]) / 2
                     for ii in range(predicted_texture.shape[0]):
-                        self.visualize_prediction(output_vis_path, batch['name'][ii], batch['view_index'][ii], batch['texture'][ii].cpu().numpy(), batch['render'][ii].cpu().numpy(), batch['partial_texture'][ii].cpu().numpy(), predicted_texture[ii].cpu().numpy(), loss_l1[ii].cpu().numpy(), loss_content[ii].cpu().numpy())
+                        self.visualize_prediction(output_vis_path, batch['name'][ii], batch['view_index'][ii], batch['texture'][ii].cpu().numpy(), batch['render'][ii].cpu().numpy(), batch['partial_texture'][ii].cpu().numpy(), predicted_texture[ii].cpu().numpy(), loss_l1[ii].cpu().numpy(), loss_content[ii].cpu().numpy(), loss_style[ii].cpu().numpy())
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(list(self.model.parameters()), lr=self.hparams.lr)
@@ -94,12 +103,13 @@ class TextureMapPredictorModule(pl.LightningModule):
         return [torch.utils.data.DataLoader(self.val_dataset, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, pin_memory=True, drop_last=False),
                 torch.utils.data.DataLoader(self.train_val_dataset, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, pin_memory=True, drop_last=False)]
 
-    def visualize_prediction(self, save_dir, name, v_idx, texture, render, partial_texture, prediction, loss_l1, loss_content):
+    def visualize_prediction(self, save_dir, name, v_idx, texture, render, partial_texture, prediction, loss_l1, loss_content, loss_style):
         import matplotlib.pyplot as plt
         [texture, prediction, render, partial_texture], _, _ = self.train_dataset.convert_data_for_visualization([texture, prediction, render, partial_texture], [], [])
         loss_l1 = (loss_l1 - loss_l1.min()) / (loss_l1.max() - loss_l1.min())
         loss_content = (loss_content - loss_content.min()) / (loss_content.max() - loss_content.min())
-        f, axarr = plt.subplots(1, 7, figsize=(4, 6))
+        loss_style = (loss_style - loss_style.min()) / (loss_style.max() - loss_style.min())
+        f, axarr = plt.subplots(1, 8, figsize=(4, 6))
         items = [render, partial_texture, texture, prediction]
         for i in range(4):
             axarr[i].imshow(items[i])
@@ -108,6 +118,8 @@ class TextureMapPredictorModule(pl.LightningModule):
         axarr[4].axis('off')
         axarr[5].imshow(loss_content, cmap='jet')
         axarr[5].axis('off')
+        axarr[6].imshow(loss_style, cmap='jet')
+        axarr[6].axis('off')
         closest_plotted = False
         closest_train = Path(self.hparams.dataset.data_dir) / 'splits' / self.hparams.dataset.name / 'closest_train.json'
         if closest_train.exists():
@@ -117,12 +129,12 @@ class TextureMapPredictorModule(pl.LightningModule):
                 if texture_path.exists():
                     with Image.open(texture_path) as texture_im:
                         closest = TextureMapDataset.process_to_padded_thumbnail(texture_im, self.train_dataset.texture_map_size) / 255
-                    axarr[6].imshow(closest)
-                    axarr[6].axis('off')
+                    axarr[7].imshow(closest)
+                    axarr[7].axis('off')
                     closest_plotted = True
         if not closest_plotted:
-            axarr[6].imshow(np.zeros_like(loss_l1), cmap='binary')
-            axarr[6].axis('off')
+            axarr[7].imshow(np.zeros_like(loss_l1), cmap='binary')
+            axarr[7].axis('off')
         plt.savefig(save_dir / "figures" / f"{name}_{v_idx}.jpg", bbox_inches='tight', dpi=240)
         plt.close()
         obj_text = Path(self.hparams.dataset.data_dir, self.hparams.dataset.mesh_dir, name, "normalized_model.obj").read_text()

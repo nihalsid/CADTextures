@@ -21,7 +21,7 @@ class FeatureLossHelper:
         x_lll[:, 2, :, :] = (x_lll[:, 2, :, :] - 0.406) / 0.225
         return x_lll
 
-    def calculate_feature_loss(self, target, prediction, weights):
+    def prepare_vgg_input(self, target, prediction, weights):
         expanded_weights = weights.expand(-1, target.shape[1], -1, -1)
         target_l, _, _ = torch.chunk(target, 3, dim=1)
         prediction_l, _, _ = torch.chunk(prediction, 3, dim=1)
@@ -29,7 +29,35 @@ class FeatureLossHelper:
         target_lll = self.normalize_for_vgg((torch.cat((target_l, target_l, target_l), 1) + 0.5) * expanded_weights)
         # noinspection PyTypeChecker
         prediction_lll = self.normalize_for_vgg((torch.cat((prediction_l, prediction_l, prediction_l), 1) + 0.5) * expanded_weights)
+        return target_lll, prediction_lll
+
+    def calculate_feature_loss(self, target, prediction, weights):
+        target_lll, prediction_lll = self.prepare_vgg_input(target, prediction, weights)
         return self.criterion(self.feature_extractor(prediction_lll)[0], self.feature_extractor(target_lll)[0].detach())
+
+    def calculate_style_loss(self, target, prediction, weights):
+        target_lll, prediction_lll = self.prepare_vgg_input(target, prediction, weights)
+        features_prediction = self.feature_extractor(prediction_lll)
+        features_target = self.feature_extractor(target_lll)
+        gram = GramMatrix()
+        error_maps = []
+        for m in range(len(features_target)):
+            gram_y = gram(features_prediction[m])
+            gram_s = gram(features_target[m])
+            error_maps.append(self.criterion(gram_y, gram_s.detach()))
+        return error_maps
+
+
+class GramMatrix(torch.nn.Module):
+
+    # noinspection PyMethodMayBeStatic
+    def forward(self, x):
+        B, C, H, W = x.size()
+        features = x.view(B, C, H * W)
+        G = torch.bmm(features, features.transpose(1, 2))  # compute the gram product
+        # normalize the values of the gram matrix
+        # by dividing by the number of element in each feature maps.
+        return G.div(C * H * W)
 
 
 class FeatureExtractor(torch.nn.Module):
