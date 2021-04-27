@@ -61,7 +61,7 @@ class TextureMapDataset(Dataset):
         if self.load_distance_field:
             df = np.load(df_path)['arr'].astype(np.float32)[np.newaxis, :, :, :]
         with Image.open(texture_path) as texture_im:
-            texture = self.from_rgb(TextureMapDataset.process_to_padded_thumbnail(texture_im, self.texture_map_size))
+            texture = self.from_rgb(TextureMapDataset.process_to_padded_thumbnail(texture_im, self.texture_map_size)).astype(np.float32)
         with Image.open(normal_path) as normal_im:
             normal = TextureMapDataset.process_to_padded_thumbnail(normal_im, self.texture_map_size)
         with Image.open(noc_path) as noc_im:
