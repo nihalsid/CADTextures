@@ -44,8 +44,7 @@ def test_feature_loss(loss_type='content'):
         optimizer = torch.optim.Adam([_input_img.requires_grad_()], lr=0.01)
         return optimizer
 
-    layers = ['relu3_2', 'relu4_2'] if loss_type == 'style' else ['relu4_2']
-    feature_loss_helper = FeatureLossHelper(layers)
+    feature_loss_helper = FeatureLossHelper(['relu4_2'], ['relu3_2', 'relu4_2'])
     feature_loss_helper.move_to_device(torch.device('cuda:0'))
 
     def run_style_transfer(content_img, style_img, input_img, num_steps=300):

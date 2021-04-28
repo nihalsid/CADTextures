@@ -22,8 +22,7 @@ class TextureMapPredictorModule(pl.LightningModule):
         dataset = lambda split: TextureMapDataset(config, split, self.preload_dict)
         self.train_dataset, self.val_dataset, self.train_val_dataset, self.train_vis_dataset, self.val_vis_dataset = dataset('train'), dataset('val'), dataset('train_val'), dataset('train_vis'), dataset('val_vis')
         self.model = get_model(config)
-        self.feature_loss_helper = FeatureLossHelper(['relu4_2'])
-        self.style_loss_helper = FeatureLossHelper(['relu3_2', 'relu4_2'])
+        self.feature_loss_helper = FeatureLossHelper(['relu4_2'], ['relu3_2', 'relu4_2'])
 
     def forward(self, batch):
         self.train_dataset.apply_batch_transforms(batch)
@@ -49,9 +48,9 @@ class TextureMapPredictorModule(pl.LightningModule):
     def calculate_losses(self, predicted_texture, batch):
         loss_l1 = self.loss_l1(batch['texture'], predicted_texture, batch['mask_texture']).mean()
         loss_content = self.feature_loss_helper.calculate_feature_loss(batch['texture'], predicted_texture, batch['mask_texture']).mean()
-        style_loss_maps = self.style_loss_helper.calculate_style_loss(batch['texture'], predicted_texture, batch['mask_texture'])
+        style_loss_maps = self.feature_loss_helper.calculate_style_loss(batch['texture'], predicted_texture, batch['mask_texture'])
         loss_style = style_loss_maps[0].mean() + style_loss_maps[1].mean()
-        loss_total = loss_l1 * self.hparams.lambda_l1 + loss_content * self.hparams.lambda_content + loss_style * self.hparams.lambda_content
+        loss_total = loss_l1 * self.hparams.lambda_l1 + loss_content * self.hparams.lambda_content + loss_style * self.hparams.lambda_style
         return loss_total, loss_l1, loss_content, loss_style
 
     def training_step(self, batch, batch_index):
@@ -87,8 +86,8 @@ class TextureMapPredictorModule(pl.LightningModule):
                     predicted_texture = self.forward(batch)
                     loss_l1 = self.loss_l1(batch['texture'], predicted_texture, batch['mask_texture']).mean(axis=1).squeeze(1)
                     loss_content = self.feature_loss_helper.calculate_feature_loss(batch['texture'], predicted_texture, batch['mask_texture']).mean(axis=1).squeeze(1)
-                    style_loss_maps = self.style_loss_helper.calculate_style_loss(batch['texture'], predicted_texture, batch['mask_texture'])
-                    loss_style = (torch.nn.functional.interpolate(style_loss_maps[1], size=style_loss_maps[0].shape[2:]) + style_loss_maps[0]) / 2
+                    style_loss_maps = self.feature_loss_helper.calculate_style_loss(batch['texture'], predicted_texture, batch['mask_texture'])
+                    loss_style = (torch.nn.functional.interpolate(style_loss_maps[1].unsqueeze(1), size=style_loss_maps[0].shape[1:]).squeeze(1) + style_loss_maps[0]) / 2
                     for ii in range(predicted_texture.shape[0]):
                         self.visualize_prediction(output_vis_path, batch['name'][ii], batch['view_index'][ii], batch['texture'][ii].cpu().numpy(), batch['render'][ii].cpu().numpy(), batch['partial_texture'][ii].cpu().numpy(), predicted_texture[ii].cpu().numpy(), loss_l1[ii].cpu().numpy(), loss_content[ii].cpu().numpy(), loss_style[ii].cpu().numpy())
 

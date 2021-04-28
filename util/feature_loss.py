@@ -4,10 +4,12 @@ import torch
 
 class FeatureLossHelper:
 
-    def __init__(self, layers):
+    def __init__(self, layers_content, layers_style):
         model_vgg19 = vgg19(pretrained=True)
         model_vgg19.eval()
-        self.feature_extractor = FeatureExtractor(model_vgg19.features, layers)
+        self.layers_content = layers_content
+        self.layers_style = layers_style
+        self.feature_extractor = FeatureExtractor(model_vgg19.features, layers_style[-1])
         self.criterion = torch.nn.MSELoss(reduction='none')
 
     def move_to_device(self, device):
@@ -33,18 +35,18 @@ class FeatureLossHelper:
 
     def calculate_feature_loss(self, target, prediction, weights):
         target_lll, prediction_lll = self.prepare_vgg_input(target, prediction, weights)
-        return self.criterion(self.feature_extractor(prediction_lll)[0], self.feature_extractor(target_lll)[0].detach())
+        return self.criterion(self.feature_extractor(prediction_lll, self.layers_content)[0], self.feature_extractor(target_lll, self.layers_content)[0].detach())
 
     def calculate_style_loss(self, target, prediction, weights):
         target_lll, prediction_lll = self.prepare_vgg_input(target, prediction, weights)
-        features_prediction = self.feature_extractor(prediction_lll)
-        features_target = self.feature_extractor(target_lll)
+        features_prediction = self.feature_extractor(prediction_lll, self.layers_style)
+        features_target = self.feature_extractor(target_lll, self.layers_style)
         gram = GramMatrix()
         error_maps = []
         for m in range(len(features_target)):
             gram_y = gram(features_prediction[m])
-            gram_s = gram(features_target[m])
-            error_maps.append(self.criterion(gram_y, gram_s.detach()))
+            gram_s = gram(features_target[m].detach())
+            error_maps.append(self.criterion(gram_y, gram_s))
         return error_maps
 
 
@@ -63,10 +65,9 @@ class GramMatrix(torch.nn.Module):
 class FeatureExtractor(torch.nn.Module):
     # Extract features from intermediate layers of a network
 
-    def __init__(self, submodule, extracted_layers):
+    def __init__(self, submodule, final_layer):
         super(FeatureExtractor, self).__init__()
-        self.extracted_layers = extracted_layers
-        self.submodule = self.create_named_vgg(submodule, extracted_layers[-1])
+        self.submodule = self.create_named_vgg(submodule, final_layer)
 
     @staticmethod
     def create_named_vgg(submodule, break_at):
@@ -92,10 +93,10 @@ class FeatureExtractor(torch.nn.Module):
                 break
         return model
 
-    def forward(self, x):
+    def forward(self, x, extracted_layers):
         outputs = []
         for name, module in self.submodule.named_children():
             x = module(x)
-            if name in self.extracted_layers:
+            if name in extracted_layers:
                 outputs += [x]
         return outputs
