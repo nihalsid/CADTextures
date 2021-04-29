@@ -1,6 +1,7 @@
 import torch
 
-from model.scribbler import ResidualBlock, Scribbler, ImageFusionScribbler, ImageFusionScribblerSlim, ImageAnd3dFusionScribbler
+from model.discriminator import Discriminator
+from model.scribbler import ResidualBlock, Scribbler, ImageFusionScribbler, ImageFusionScribblerSlim, ImageAnd3dFusionScribbler, ScribblerGenerator
 from util.misc import print_model_parameter_count
 
 
@@ -35,5 +36,19 @@ def test_image_3d_fusion_scribbler():
     print_model_parameter_count(model)
 
 
+def test_discriminator():
+    texture_tensor = torch.randn(8, 3, 384, 384)
+    model = Discriminator(3, 8, True)
+    print(model(texture_tensor).shape)
+    print_model_parameter_count(model)
+
+
+def test_scribbler_generator():
+    map_tensor = torch.randn(8, 128)
+    model = ScribblerGenerator(128, 3, 16)
+    print(model(map_tensor).shape)
+    print_model_parameter_count(model)
+
+
 if __name__ == "__main__":
-    test_image_fusion_scribbler()
+    test_scribbler_generator()

@@ -357,6 +357,59 @@ class ImageFusionScribblerSlim(nn.Module):
         return self.tanh(x) * 0.5
 
 
+class ScribblerGenerator(nn.Module):
+
+    def __init__(self, input_nc, output_nc, ngf):
+        super().__init__()
+        norm = lambda c: nn.GroupNorm(4, c)
+        # noinspection PyTypeChecker
+        self.decoder = nn.ModuleList([
+            nn.Sequential(
+                UpsamplingBlock(input_nc, ngf, 3, 1, 1),
+                norm(ngf),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf, ngf * 2, 3, 1, 1),
+                norm(ngf * 2),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 2, ngf * 4, 3, 1, 1),
+                norm(ngf * 4),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 4, ngf * 8, 3, 1, 1),
+                norm(ngf * 8),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 8, ngf * 4, 3, 1, 1),
+                norm(ngf * 4),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 4, ngf * 2, 3, 1, 1),
+                norm(ngf * 2),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 2, ngf, 3, 1, 1),
+                norm(ngf),
+                nn.ReLU(True),
+            ),
+            nn.Conv2d(ngf, 3, output_nc, 1, 1)
+        ])
+        self.tanh = nn.Tanh()
+
+    def forward(self, input_maps):
+        x = input_maps.reshape((input_maps.shape[0], input_maps.shape[1], 1, 1))
+        for module in self.decoder:
+            x = module(x)
+        return self.tanh(x) * 0.5
+
+
 class ImageAnd3dFusionScribbler(ImageFusionScribbler):
 
     def __init__(self, input_nc, input_nc_image, output_nc, ngf, ngf_image, ngf_3d):

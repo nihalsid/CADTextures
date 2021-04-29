@@ -1,0 +1,29 @@
+defaults:
+  - dataset: single_cube
+
+model:
+  generator_ngf: 16
+  discriminator_ngf: 8
+
+gan_loss_type: wgan_gp
+
+experiment: fast_dev
+seed: null
+save_epoch: 1
+sanity_steps: 1
+max_epoch: 10000
+val_check_percent: 1.0
+val_check_interval: 1
+resume: null
+
+batch_size: 8
+num_workers: 8
+lr: 0.0001
+lambda_g: 1
+lambda_d: 1
+lambda_gp: 10
+
+hydra:
+  output_subdir: null # Disable saving of config files. We'll do that ourselves.
+  run:
+    dir: .
