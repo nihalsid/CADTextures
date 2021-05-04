@@ -1,7 +1,7 @@
 import torch
 
-from model.discriminator import Discriminator
-from model.scribbler import ResidualBlock, Scribbler, ImageFusionScribbler, ImageFusionScribblerSlim, ImageAnd3dFusionScribbler, ScribblerGenerator
+from model.discriminator import SanityTestDiscriminator, TextureGANDiscriminator, TextureGANDiscriminatorSlim
+from model.texture_gan import ResidualBlock, Scribbler, ImageFusionScribblerSlim, ImageAnd3dFusionScribbler, ScribblerGenerator, ScribblerSlim, TextureGAN, TextureGANSlim
 from util.misc import print_model_parameter_count
 
 
@@ -37,8 +37,8 @@ def test_image_3d_fusion_scribbler():
 
 
 def test_discriminator():
-    texture_tensor = torch.randn(8, 3, 384, 384)
-    model = Discriminator(3, 8, True)
+    texture_tensor = torch.randn(8, 3, 128, 128)
+    model = TextureGANDiscriminator(3, 16)
     print(model(texture_tensor).shape)
     print_model_parameter_count(model)
 
@@ -50,5 +50,26 @@ def test_scribbler_generator():
     print_model_parameter_count(model)
 
 
+def test_scribbler_conditional_generator():
+    texture_partial = torch.randn(8, 4, 384, 384)
+    model = ScribblerSlim(4, 3, 32)
+    print(model(texture_partial).shape)
+    print_model_parameter_count(model)
+
+
+def test_texturegan_generator():
+    texture_partial = torch.randn(8, 4, 384, 384)
+    model = TextureGAN(4, 3, 16)
+    print(model(texture_partial).shape)
+    print_model_parameter_count(model)
+
+
+def test_textureganslim_generator():
+    texture_partial = torch.randn(8, 4, 384, 384)
+    model = TextureGANSlim(4, 3, 16)
+    print(model(texture_partial).shape)
+    print_model_parameter_count(model)
+
+
 if __name__ == "__main__":
-    test_scribbler_generator()
+    test_discriminator()

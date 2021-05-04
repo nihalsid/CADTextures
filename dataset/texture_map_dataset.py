@@ -1,4 +1,6 @@
 import random
+
+import torch
 from PIL import Image
 from torch.utils.data.dataset import Dataset
 from tqdm import tqdm
@@ -80,7 +82,7 @@ class TextureMapDataset(Dataset):
         with Image.open(noc_render_path) as render_noc:
             noc_render = np.array(render_noc).astype(np.float32)
         with Image.open(partial_texture_path) as partial_tex:
-            partial_texture = self.from_rgb(np.array(partial_tex)).astype(np.float32)
+            partial_texture = self.from_rgb(TextureMapDataset.process_to_padded_thumbnail(partial_tex, self.texture_map_size)).astype(np.float32)
         with Image.open(mask_path) as mask_im:
             mask_render = np.array(mask_im)
             mask_render = np.logical_and(np.logical_and(mask_render[:, :, 0] < 50, mask_render[:, :, 1] < 50), mask_render[:, :, 2] < 50)
@@ -106,6 +108,7 @@ class TextureMapDataset(Dataset):
         else:
             df, texture, normal, noc, mask_texture = self.load_view_independent_data_from_disk(index)
             render, noc_render, mask_render, partial_texture = self.load_view_dependent_data_from_disk(index, view_index)
+
         return {
             'name': f'{item}',
             'view_index': view_index,
@@ -133,6 +136,11 @@ class TextureMapDataset(Dataset):
                 batch[item][:, 0, :, :] = batch[item][:, 0, :, :] / 100 - 0.5
                 batch[item][:, 1, :, :] = batch[item][:, 1, :, :] / 256
                 batch[item][:, 2, :, :] = batch[item][:, 2, :, :] / 256
+        batch['texture'] = self.apply_mask_texture(batch['texture'], batch['mask_texture'])
+
+    @staticmethod
+    def apply_mask_texture(texture, mask):
+        return texture * mask.expand(-1, texture.shape[1], -1, -1)
 
     def convert_data_for_visualization(self, colored_items, non_colored_items, masks):
         for i in range(len(colored_items)):
@@ -152,6 +160,7 @@ class TextureMapDataset(Dataset):
             item[:, :, 0] = (item[:, :, 0] + 0.5) * 100
             item[:, :, 1] = np.clip(item[:, :, 1] * 256, -128, 127)
             item[:, :, 2] = np.clip(item[:, :, 2] * 256, -128, 127)
+            # item[:, :, 1:] = 0
             item = np.clip(self.to_rgb(item), 0, 255) / 255
         return item
 
@@ -202,3 +211,34 @@ class TextureMapDataset(Dataset):
             to_rgb = lambda x: cspace_convert(x, 'CIELab', 'sRGB255')
             from_rgb = lambda x: cspace_convert(x[:, :, :3], 'sRGB255', 'CIELab')
         return from_rgb, to_rgb
+
+    @staticmethod
+    def get_valid_sampling_area(mask, patch_size):
+        valid_area = mask.clone()
+        mask_shifted_dim_2 = torch.zeros_like(mask)
+        mask_shifted_dim_2[:, :, :-patch_size, :] = mask[:, :, patch_size:, :]
+        zero_dim_2 = torch.logical_and(torch.logical_not(mask_shifted_dim_2), mask)
+        mask_shifted_dim_3 = torch.zeros_like(mask)
+        mask_shifted_dim_3[:, :, :, :-patch_size] = mask[:, :, :, patch_size:]
+        zero_dim_3 = torch.logical_and(torch.logical_not(mask_shifted_dim_3), mask)
+        mask_shifted_dim_23 = torch.zeros_like(mask)
+        mask_shifted_dim_23[:, :, :-patch_size, :-patch_size] = mask[:, :, patch_size:, patch_size:]
+        zero_dim_23 = torch.logical_and(torch.logical_not(mask_shifted_dim_23), mask)
+        valid_area[zero_dim_2] = 0
+        valid_area[zero_dim_3] = 0
+        valid_area[zero_dim_23] = 0
+        return valid_area
+
+    @staticmethod
+    def sample_patches(mask, patch_size, num_patches, *tensors):
+        valid_area = TextureMapDataset.get_valid_sampling_area(mask, patch_size)
+        batch_size = tensors[0].shape[0]
+        all_samples = [[] for _ in range(len(tensors))]
+        for b in range(batch_size):
+            samples = torch.where(valid_area[b, 0, :, :])
+            for tid in range(len(tensors)):
+                indices = random.sample(list(range(samples[0].shape[0])), num_patches)
+                for k in indices:
+                    sampled_generated = tensors[tid][b: b + 1, :, samples[0][k]: samples[0][k] + patch_size, samples[1][k]: samples[1][k] + patch_size]
+                    all_samples[tid].append(sampled_generated)
+        return [torch.cat(all_samples[tid], dim=0) for tid in range(len(tensors))]

@@ -9,8 +9,8 @@ import numpy as np
 from PIL import Image
 
 from dataset.noise_dataset import NoiseDataset
-from model.discriminator import Discriminator
-from model.scribbler import ScribblerGenerator
+from model.discriminator import TextureGANDiscriminatorSlim
+from model.texture_gan import ScribblerGenerator
 from util.gan_loss import GANLoss
 
 
@@ -21,8 +21,9 @@ class GANTrainer(pl.LightningModule):
         self.preload_dict = {}
         self.hparams = config
         self.z_dim = 128
+        self.only_l_channel = config.only_l
         self.generator = ScribblerGenerator(self.z_dim, 3, self.hparams.model.generator_ngf)
-        self.discriminator = Discriminator(3, self.hparams.model.discriminator_ngf, False)
+        self.discriminator = TextureGANDiscriminatorSlim(1 if self.only_l_channel else 3, self.hparams.model.discriminator_ngf)
         dataset = lambda size: NoiseDataset(self.hparams, self.z_dim, size)
         self.train_dataset, self.val_dataset, self.val_vis_dataset = dataset(10240), dataset(24), dataset(49)
         self.gan_loss = GANLoss(self.hparams.gan_loss_type)
@@ -47,14 +48,17 @@ class GANTrainer(pl.LightningModule):
 
     def training_step(self, batch, batch_idx, optimizer_idx):
         if optimizer_idx == 0:
-            logits = self.forward(batch)
-            g_loss = self.gan_loss.compute_generator_loss(self.discriminator, logits)
+            self.train_dataset.apply_batch_transform(batch)
+            generated_texture = self.forward(batch)
+            g_loss = self.gan_loss.compute_generator_loss(self.discriminator, generated_texture[:, 0: (1 if self.only_l_channel else 3), :, :])
             total_loss = g_loss * self.hparams.lambda_g
             self.log(f'adversarial/G', g_loss, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
         else:
+            self.train_dataset.apply_batch_transform(batch)
             with torch.no_grad():
                 generated_texture = self.forward(batch)
-            d_real_loss, d_fake_loss, d_gp_loss = self.gan_loss.compute_discriminator_loss(self.discriminator, batch['target'], generated_texture.detach())
+            d_real_loss, d_fake_loss, d_gp_loss = self.gan_loss.compute_discriminator_loss(self.discriminator, batch['target'][:, 0:(1 if self.only_l_channel else 3), :, :],
+                                                                                           generated_texture.detach()[:, 0:(1 if self.only_l_channel else 3), :, :])
             total_loss = self.hparams.lambda_d * (d_real_loss + d_fake_loss) + self.hparams.lambda_gp * d_gp_loss * (int(self.hparams.lambda_d > 0))
             self.log(f'adversarial/D_real', d_real_loss, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
             self.log(f'adversarial/D_fake', d_fake_loss, on_step=True, on_epoch=False, prog_bar=False, logger=True, sync_dist=True)
@@ -79,23 +83,24 @@ class GANTrainer(pl.LightningModule):
                 self.val_vis_dataset.apply_batch_transform(batch)
                 _r = i // self.image_side
                 _c = i % self.image_side
-                vis_image[_r * (w_img + 5): _r * (w_img + 5) + w_img, _c * (w_img + 5): _c * (w_img + 5) + w_img] = self.val_vis_dataset.denormalize_and_rgb(batch['target'].squeeze(0).permute((1, 2, 0)).numpy())
+                vis_image[_r * (w_img + 5): _r * (w_img + 5) + w_img, _c * (w_img + 5): _c * (w_img + 5) + w_img] = self.val_vis_dataset.denormalize_and_rgb(batch['target'].squeeze(0).permute((1, 2, 0)).numpy(), self.only_l_channel)
         else:
             predicted_texture = self.generator(self.vis_vector.cuda(self.device)).cpu()
             for i in range(self.image_side * self.image_side):
                 _r = i // self.image_side
                 _c = i % self.image_side
-                vis_image[_r * (w_img + 5): _r * (w_img + 5) + w_img, _c * (w_img + 5): _c * (w_img + 5) + w_img] = self.val_vis_dataset.denormalize_and_rgb(predicted_texture[i].permute((1, 2, 0)).numpy())
+                vis_image[_r * (w_img + 5): _r * (w_img + 5) + w_img, _c * (w_img + 5): _c * (w_img + 5) + w_img] = self.val_vis_dataset.denormalize_and_rgb(predicted_texture[i].permute((1, 2, 0)).numpy(), self.only_l_channel)
         Image.fromarray(vis_image).save(output_vis_path / f"{self.global_step:08d}.jpg")
 
 
-@hydra.main(config_path='../config', config_name='gan')
+@hydra.main(config_path='../config', config_name='gan_pure')
 def main(config):
     from datetime import datetime
     from pytorch_lightning import Trainer, seed_everything
     from pytorch_lightning.callbacks import ModelCheckpoint
     from pytorch_lightning.loggers import WandbLogger
     from util.filesystem_logger import FilesystemLogger
+
     config.experiment = f"{datetime.now().strftime('%d%m%H%M')}_gantest_{config['experiment']}"
     if config.val_check_interval > 1:
         config.val_check_interval = int(config.val_check_interval)
@@ -105,6 +110,7 @@ def main(config):
     seed_everything(config.seed)
     # noinspection PyUnusedLocal
     filesystem_logger = FilesystemLogger(config)
+
     logger = WandbLogger(project=f'GANTest', name=config.experiment, id=config.experiment)
 
     checkpoint_callback = ModelCheckpoint(dirpath=(Path("runs") / config.experiment), filename='_ckpt_{epoch}', save_top_k=-1, verbose=False, period=config.save_epoch)

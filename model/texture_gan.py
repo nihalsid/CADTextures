@@ -357,6 +357,87 @@ class ImageFusionScribblerSlim(nn.Module):
         return self.tanh(x) * 0.5
 
 
+class ScribblerSlim(nn.Module):
+
+    def __init__(self, input_nc, output_nc, ngf):
+        super().__init__()
+        norm = lambda c: nn.GroupNorm(4, c)
+        # noinspection PyTypeChecker
+        self.map_features = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(input_nc, ngf, 3, 2, 1),
+                norm(ngf),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                nn.Conv2d(ngf, ngf * 2, 3, 2, 1),
+                norm(ngf * 2),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                nn.Conv2d(ngf * 2, ngf * 4, 3, 2, 1),
+                norm(ngf * 4),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                nn.Conv2d(ngf * 4, ngf * 4, 3, 2, 1),
+                norm(ngf * 4),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                nn.Conv2d(ngf * 4, ngf * 4, 3, 2, 1),
+                norm(ngf * 4),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                nn.Conv2d(ngf * 4, ngf * 8, 3, 2, 1),
+                norm(ngf * 8),
+                nn.ReLU(True),
+            ),
+        ])
+        # noinspection PyTypeChecker
+        self.decoder = nn.ModuleList([
+            nn.Sequential(
+                UpsamplingBlock(ngf * 8, ngf * 8, 3, 1, 1),
+                norm(ngf * 8),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 8, ngf * 4, 3, 1, 1),
+                norm(ngf * 4),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 4, ngf * 4, 3, 1, 1),
+                norm(ngf * 4),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 4, ngf * 4, 3, 1, 1),
+                norm(ngf * 4),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 4, ngf * 2, 3, 1, 1),
+                norm(ngf * 2),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 2, ngf, 3, 1, 1),
+                norm(ngf),
+                nn.ReLU(True),
+            ),
+            nn.Conv2d(ngf, 3, output_nc, 1, 1)
+        ])
+        self.tanh = nn.Tanh()
+
+    def forward(self, input_maps, *_condition):
+        x = nn.Sequential(*self.map_features)(input_maps)
+        for module in self.decoder:
+            x = module(x)
+        return self.tanh(x) * 0.5
+
+
 class ScribblerGenerator(nn.Module):
 
     def __init__(self, input_nc, output_nc, ngf):
@@ -479,6 +560,179 @@ class ImageAnd3dFusionScribbler(ImageFusionScribbler):
         return self.tanh(x) * 0.5
 
 
+class TextureGAN(nn.Module):
+
+    def __init__(self, input_nc, output_nc, ngf):
+
+        super(TextureGAN, self).__init__()
+        norm = lambda c: nn.GroupNorm(4, c)
+
+        # noinspection PyTypeChecker
+        self.module_list = nn.ModuleList([
+            MainModel(input_nc, ngf, norm),
+            nn.Conv2d(ngf + input_nc, ngf * 2, 3, 1, 1),
+            ResidualBlock(ngf * 2, ngf * 2),
+            ResidualBlock(ngf * 2, ngf * 2),
+            nn.Conv2d(ngf * 2, output_nc, 3, 1, 1),
+        ])
+        self.tanh = nn.Tanh()
+
+    def forward(self, x, *condition):
+        for module in self.module_list:
+            x = module(x)
+        return self.tanh(x) * 0.5
+
+
+class TextureGANSlim(nn.Module):
+
+    def __init__(self, input_nc, output_nc, ngf):
+
+        super(TextureGANSlim, self).__init__()
+        norm = lambda c: nn.GroupNorm(4, c)
+
+        # noinspection PyTypeChecker
+        self.module_list = nn.ModuleList([
+            MainModelSlim(input_nc, ngf, norm),
+            nn.Conv2d(ngf + input_nc, ngf * 2, 3, 1, 1),
+            ResidualBlock(ngf * 2, ngf * 2),
+            nn.Conv2d(ngf * 2, output_nc, 3, 1, 1),
+        ])
+        self.tanh = nn.Tanh()
+
+    def forward(self, x, *_condition):
+        for module in self.module_list:
+            x = module(x)
+        return self.tanh(x) * 0.5
+
+
+class MainModel(nn.Module):
+
+    def __init__(self, input_nc, ngf, norm):
+        super(MainModel, self).__init__()
+
+        # noinspection PyTypeChecker
+        self.module_list = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(input_nc, ngf, 3, 1, 1),
+                norm(ngf),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                ResidualBlock(ngf, ngf),
+                nn.Conv2d(ngf, ngf * 2, 3, 2, 1),
+                norm(ngf * 2),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                ResidualBlock(ngf * 2, ngf * 2),
+                nn.Conv2d(ngf * 2, ngf * 4, 3, 2, 1),
+                norm(ngf * 4),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                ResidualBlock(ngf * 4, ngf * 4),
+                nn.Conv2d(ngf * 4, ngf * 8, 3, 2, 1),
+                norm(ngf * 8),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                ResidualBlock(ngf * 8, ngf * 8),
+                ResidualBlock(ngf * 8, ngf * 8),
+                ResidualBlock(ngf * 8, ngf * 8),
+                ResidualBlock(ngf * 8, ngf * 8),
+                ResidualBlock(ngf * 8, ngf * 8),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 8, ngf * 4, 3, 1, 1),
+                norm(ngf * 4),
+                nn.ReLU(True),
+                ResidualBlock(ngf * 4, ngf * 4),
+                ResidualBlock(ngf * 4, ngf * 4),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 4, ngf * 2, 3, 1, 1),
+                norm(ngf * 2),
+                nn.ReLU(True),
+                ResidualBlock(ngf * 2, ngf * 2),
+                ResidualBlock(ngf * 2, ngf * 2),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 2, ngf, 3, 1, 1),
+                norm(ngf),
+                nn.ReLU(True),
+                ResidualBlock(ngf, ngf),
+            ),
+        ])
+
+    def forward(self, x_in, *_condition):
+        x = x_in
+        for module in self.module_list:
+            x = module(x)
+        return torch.cat((x, x_in), dim=1)
+
+
+class MainModelSlim(nn.Module):
+
+    def __init__(self, input_nc, ngf, norm):
+        super(MainModelSlim, self).__init__()
+
+        # noinspection PyTypeChecker
+        self.module_list = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(input_nc, ngf, 3, 1, 1),
+                norm(ngf),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                ResidualBlock(ngf, ngf),
+                nn.Conv2d(ngf, ngf * 2, 3, 2, 1),
+                norm(ngf * 2),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                ResidualBlock(ngf * 2, ngf * 2),
+                nn.Conv2d(ngf * 2, ngf * 4, 3, 2, 1),
+                norm(ngf * 4),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                ResidualBlock(ngf * 4, ngf * 4),
+                nn.Conv2d(ngf * 4, ngf * 8, 3, 2, 1),
+                norm(ngf * 8),
+                nn.ReLU(True),
+            ),
+            nn.Sequential(
+                ResidualBlock(ngf * 8, ngf * 8),
+                ResidualBlock(ngf * 8, ngf * 8),
+                ResidualBlock(ngf * 8, ngf * 8),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 8, ngf * 4, 3, 1, 1),
+                norm(ngf * 4),
+                nn.ReLU(True),
+                ResidualBlock(ngf * 4, ngf * 4),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 4, ngf * 2, 3, 1, 1),
+                norm(ngf * 2),
+                nn.ReLU(True),
+                ResidualBlock(ngf * 2, ngf * 2),
+            ),
+            nn.Sequential(
+                UpsamplingBlock(ngf * 2, ngf, 3, 1, 1),
+                norm(ngf),
+                nn.ReLU(True),
+                ResidualBlock(ngf, ngf),
+            ),
+        ])
+
+    def forward(self, x_in):
+        x = x_in
+        for module in self.module_list:
+            x = module(x)
+        return torch.cat((x, x_in), dim=1)
+
+
 def get_model(config):
     map_channels = 1
     render_channels = 4
@@ -490,6 +744,11 @@ def get_model(config):
         map_channels += 3
     if 'noc_render' in config.inputs:
         render_channels += 3
+    if len(config.inputs) == 1 and config.inputs[0] == 'partial_texture':
+        if config.model.slim:
+            return TextureGANSlim(map_channels, 3, config.model.input_texture_ngf)
+        else:
+            return TextureGAN(map_channels, 3, config.model.input_texture_ngf)
     if 'distance_field' in config.inputs:
         if config.model.slim:
             raise NotImplementedError

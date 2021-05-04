@@ -23,22 +23,19 @@ class FeatureLossHelper:
         x_lll[:, 2, :, :] = (x_lll[:, 2, :, :] - 0.406) / 0.225
         return x_lll
 
-    def prepare_vgg_input(self, target, prediction, weights):
-        expanded_weights = weights.expand(-1, target.shape[1], -1, -1)
-        target_l, _, _ = torch.chunk(target, 3, dim=1)
-        prediction_l, _, _ = torch.chunk(prediction, 3, dim=1)
+    def prepare_vgg_input(self, target_l, prediction_l):
         # noinspection PyTypeChecker
-        target_lll = self.normalize_for_vgg((torch.cat((target_l, target_l, target_l), 1) + 0.5) * expanded_weights)
+        target_lll = self.normalize_for_vgg((torch.cat((target_l, target_l, target_l), 1) + 0.5))
         # noinspection PyTypeChecker
-        prediction_lll = self.normalize_for_vgg((torch.cat((prediction_l, prediction_l, prediction_l), 1) + 0.5) * expanded_weights)
+        prediction_lll = self.normalize_for_vgg((torch.cat((prediction_l, prediction_l, prediction_l), 1) + 0.5))
         return target_lll, prediction_lll
 
-    def calculate_feature_loss(self, target, prediction, weights):
-        target_lll, prediction_lll = self.prepare_vgg_input(target, prediction, weights)
+    def calculate_feature_loss(self, target_l, prediction_l):
+        target_lll, prediction_lll = self.prepare_vgg_input(target_l, prediction_l)
         return self.criterion(self.feature_extractor(prediction_lll, self.layers_content)[0], self.feature_extractor(target_lll, self.layers_content)[0].detach())
 
-    def calculate_style_loss(self, target, prediction, weights):
-        target_lll, prediction_lll = self.prepare_vgg_input(target, prediction, weights)
+    def calculate_style_loss(self, target_l, prediction_l):
+        target_lll, prediction_lll = self.prepare_vgg_input(target_l, prediction_l)
         features_prediction = self.feature_extractor(prediction_lll, self.layers_style)
         features_target = self.feature_extractor(target_lll, self.layers_style)
         gram = GramMatrix()

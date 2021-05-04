@@ -1,5 +1,5 @@
 # @package _group_
-input_texture_ngf: 12
-render_ngf: 12
+input_texture_ngf: 16
+render_ngf: 16
 df_ngf: 8
 slim: True

@@ -50,7 +50,6 @@ def test_feature_loss(loss_type='content'):
     def run_style_transfer(content_img, style_img, input_img, num_steps=300):
         optimizer = get_input_optimizer(input_img)
         print('Optimizing..')
-        weights = torch.ones([1, 1, content_img.shape[2], content_img.shape[3]]).cuda()
         run = [0]
         while run[0] <= num_steps:
             def closure():
@@ -58,10 +57,10 @@ def test_feature_loss(loss_type='content'):
                 optimizer.zero_grad()
                 loss = None
                 if loss_type == 'content':
-                    loss = feature_loss_helper.calculate_feature_loss(content_img, input_img, weights).mean()
+                    loss = feature_loss_helper.calculate_feature_loss(content_img, input_img).mean()
                 elif loss_type == 'style':
-                    loss_content = feature_loss_helper.calculate_feature_loss(content_img, input_img, weights).mean()
-                    loss_maps = feature_loss_helper.calculate_style_loss(style_img, input_img, weights)
+                    loss_content = feature_loss_helper.calculate_feature_loss(content_img, input_img).mean()
+                    loss_maps = feature_loss_helper.calculate_style_loss(style_img, input_img)
                     loss = (loss_maps[0].mean() + loss_maps[1].mean()) * 1e6 + loss_content
                 loss.backward()
                 run[0] += 1
@@ -83,4 +82,4 @@ def test_feature_loss(loss_type='content'):
 
 
 if __name__ == "__main__":
-    test_feature_loss('style')
+    test_feature_loss('content')

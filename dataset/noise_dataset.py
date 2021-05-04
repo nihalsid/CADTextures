@@ -30,14 +30,17 @@ class NoiseDataset(torch.utils.data.Dataset):
             batch['target'][:, 1, :, :] = batch['target'][:, 1, :, :] / 256
             batch['target'][:, 2, :, :] = batch['target'][:, 2, :, :] / 256
 
-    def denormalize_and_rgb(self, arr):
+    def denormalize_and_rgb(self, arr, only_l):
         if self.color_space == 'rgb':
             arr = (arr + 0.5) * 255
         elif self.color_space == 'lab':
             arr[:, :, 0] = np.clip((arr[:, :, 0] + 0.5) * 100, 0, 100)
-            arr[:, :, 1] = np.clip(arr[:, :, 1] * 256, -128, 127)
-            arr[:, :, 2] = np.clip(arr[:, :, 2] * 256, -128, 127)
-        return self.to_rgb(arr).astype(np.uint8)
+            if only_l:
+                arr[:, :, 1:] = 0
+            else:
+                arr[:, :, 1] = np.clip(arr[:, :, 1] * 256, -128, 127)
+                arr[:, :, 2] = np.clip(arr[:, :, 2] * 256, -128, 127)
+        return np.clip(self.to_rgb(arr), 0, 255).astype(np.uint8)
 
     def __getitem__(self, index):
         random_noise = np.random.normal(0, 1, size=self.z_dim).astype(np.float32)
