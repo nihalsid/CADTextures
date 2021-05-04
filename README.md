@@ -18,9 +18,11 @@ Logs are uploaded to [weights and biases](https://wandb.ai/).
 
 
 ```
+.editorconfig                       # code style
+
 config/                             # refer to hydra on how these configs are used
     ├── dataset/                    # dataset config group
-    ├── inputs/                     # input related config group, i.e. what inputs go in the network
+    ├── inputs/                     # input related config group, i.e. inputs to the network
     ├── model/                      # input group related to model params
     ├── base.yaml                   # hydra config#1
     ├── gan_conditional.yaml        # hydra config#2
