@@ -1,0 +1,39 @@
+defaults:
+  - dataset: single_cube_completion
+  - model: singlecube_colors
+
+model:
+  discriminator_ngf: ${model.input_texture_ngf}
+
+experiment: fast_dev
+seed: null
+wandb_main: False
+suffix: ''
+save_epoch: 5
+sanity_steps: 0
+max_epoch: 10000
+val_check_percent: 1.0
+val_check_interval: 5
+resume: null
+
+batch_size: 4
+num_workers: 8
+lr: 0.0001
+lambda_regr_l: 100
+lambda_regr_ab: 100000
+lambda_content: 10
+lambda_style: 0
+lambda_g: 10
+lambda_g_local: 10
+lambda_gp: 10
+gan_loss_type: wgan_gp
+regression_loss_type: l2
+
+num_patches: 5
+patch_size: 25
+
+hydra:
+  output_subdir: null # Disable saving of config files. We'll do that ourselves.
+  run:
+    dir: .
+
