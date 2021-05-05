@@ -50,6 +50,7 @@ model/                              # neural network models
 
 slurm/                              # slurm driving scripts
 test/                               # unit tests
+runs/                               # output logs and results from training
 
 trainer/                                # pytorch-lightning trainer scripts
     ├── train_texture_map_predictor.py  # for training texture gan

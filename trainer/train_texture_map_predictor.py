@@ -19,7 +19,6 @@ from util.regression_loss import RegressionLossHelper
 class TextureMapPredictorModule(pl.LightningModule):
 
     def __init__(self, config):
-        print(os.getcwd())
         super(TextureMapPredictorModule, self).__init__()
         self.hparams = config
         self.preload_dict = {}
