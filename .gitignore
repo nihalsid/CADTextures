@@ -1,5 +1,6 @@
 data/*
 !data/splits
+!data/SingleShape/Test
 wandb/
 runs/
 runs
