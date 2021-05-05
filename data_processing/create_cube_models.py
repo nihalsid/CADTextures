@@ -1,3 +1,4 @@
+import shutil
 from argparse import ArgumentParser
 from shutil import copyfile
 from pathlib import Path
@@ -147,6 +148,37 @@ def create_partial_textures(dataset, num_views, proc, num_proc):
                 Image.fromarray(partial_texture.reshape(noc.shape)).save(folder / sample / f"partial_texture_{i:03d}.png")
 
 
+def create_texture_completion_task_data(dataset, patch_range, proc, num_proc):
+    import torch
+    from dataset.texture_map_dataset import TextureMapDataset
+    dataset_0, dataset_1 = dataset.split('/')
+    folder = Path(f"data/{dataset_0}/{dataset_1}")
+    output_folder = Path(f"data/{dataset_0}/completion_{dataset_1}")
+    all_list = read_list(f'data/splits/{dataset_0}/{dataset_1}/official/all.txt')
+    all_list = [x for i, x in enumerate(all_list) if i % num_proc == proc]
+    with Image.open(folder / all_list[0] / "surface_normals.png") as normal_img:
+        arr = np.array(normal_img)
+        mask = torch.from_numpy(np.logical_or(np.logical_or(arr[:, :, 0] != 0, arr[:, :, 1] != 0), arr[:, :, 2] != 0)).unsqueeze(0).unsqueeze(0).float()
+    mask_arr = (mask.squeeze().numpy() * 255).astype(np.uint8)
+    sampling_area = np.nonzero(TextureMapDataset.get_valid_sampling_area(mask, np.max(patch_range)).squeeze().numpy())
+
+    for sample in tqdm(all_list):
+        (output_folder / sample).mkdir(exist_ok=True, parents=True)
+        with Image.open(folder / sample / f"surface_texture.png") as tex_img:
+            texture = np.array(tex_img)[:, :, :3]
+        shutil.copyfile(folder / sample / f"surface_texture.png", output_folder / sample / "texture_complete.png")
+        Image.fromarray(mask_arr).save(output_folder / sample / "mask.png")
+        for frame_idx in range(12):
+            missing_mask_arr = np.zeros_like(mask_arr)
+            missing_texture_arr = np.copy(texture)
+            patch_idx = random.choice(range(sampling_area[0].shape[0]))
+            patch_size = random.choice(range(patch_range[0], patch_range[1]))
+            missing_texture_arr[sampling_area[0][patch_idx]: sampling_area[0][patch_idx] + patch_size, sampling_area[1][patch_idx]: sampling_area[1][patch_idx] + patch_size, :] = 0
+            missing_mask_arr[sampling_area[0][patch_idx]: sampling_area[0][patch_idx] + patch_size, sampling_area[1][patch_idx]: sampling_area[1][patch_idx] + patch_size] = 255
+            Image.fromarray(missing_texture_arr).save(output_folder / sample / f"texture_incomplete_{frame_idx:02d}.png")
+            Image.fromarray(missing_mask_arr).save(output_folder / sample / f"missing_{frame_idx:02d}.png")
+
+
 def run_partial_texture_proc():
     parser = ArgumentParser()
     parser.add_argument('--dataset', default='3D-FUTURE/Sofa', type=str)
@@ -157,5 +189,15 @@ def run_partial_texture_proc():
     create_partial_textures(args.dataset, args.num_views, args.proc, args.num_proc)
 
 
+def run_texture_completion_proc():
+    parser = ArgumentParser()
+    parser.add_argument('--dataset', default='3D-FUTURE/Sofa', type=str)
+    parser.add_argument('--patch_range', nargs='+', default=[70, 85])
+    parser.add_argument('--num_proc', default=1, type=int)
+    parser.add_argument('--proc', default=0, type=int)
+    args = parser.parse_args()
+    create_texture_completion_task_data(args.dataset, args.patch_range, args.proc, args.num_proc)
+
+
 if __name__ == "__main__":
-    run_partial_texture_proc()
+    run_texture_completion_proc()
