@@ -4,15 +4,18 @@ Work in progress experiments for CAD texturing project.
 
 ### Dependencies
 
-Check out `requirements.txt` for dependencies. 
+Check out `requirements.txt` for dependencies. Additionally, you'll need [PyMarchingCubes](https://github.com/JustusThies/PyMarchingCubes).
 
 ### Basic Example
 
 Run the following command for an overfitting example on the checked in data: 
 ```bash
-
+# make sure current directory is in python path
+export PYTHONPATH=.
+# run training script 
+python trainer/train_texture_map_predictor.py sanity_steps=1 dataset=test_cube inputs=2d_only_partial_texture val_check_interval=10 model=singlecube_colors experiment=test_run
 ```
-Logs are uploaded to [weights and biases](https://wandb.ai/).
+Logs are uploaded to [weights and biases](https://wandb.ai/), so you may need to be signed in there.
 
 ### File Structure
 

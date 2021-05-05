@@ -15,7 +15,6 @@ PyEXR
 pyflann-py3
 pygifsicle
 pyglet
-PyMarchingCubes
 PyOpenGL
 pyrender
 pytorch-lightning
@@ -36,5 +35,4 @@ urllib3
 visdom
 wandb
 argparse
-yaml
 typing
