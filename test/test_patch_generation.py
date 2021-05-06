@@ -2,21 +2,26 @@ import torch
 from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
+import cv2 as cv
 
 from dataset.texture_map_dataset import TextureMapDataset
 
 
 def test_mask_generation():
-    patch_size = 25 * 3
-    with Image.open("data/SingleShape/Cube/000-000-143/surface_normals.png") as texture_im:
-        arr = np.array(texture_im)
+    patch_size = 12 * 3
+    with Image.open("test/images/mask.png") as mask_im:
+        arr = np.array(mask_im)
         mask = torch.from_numpy(np.logical_or(np.logical_or(arr[:, :, 0] != 0, arr[:, :, 1] != 0), arr[:, :, 2] != 0)).unsqueeze(0).unsqueeze(0).float()
     sampling_area = TextureMapDataset.get_valid_sampling_area(mask, patch_size)
-    f, axarr = plt.subplots(1, 2, figsize=(8, 4))
+    f, axarr = plt.subplots(1, 3, figsize=(12, 4))
     axarr[0].imshow(mask[0, 0, :, :].numpy())
     axarr[0].axis('off')
     axarr[1].imshow(sampling_area[0, 0, :, :].numpy())
     axarr[1].axis('off')
+    kernel = cv.getStructuringElement(cv.MORPH_RECT, (patch_size, patch_size), (patch_size // 2, patch_size // 2))
+    mask_eroded = np.array(cv.erode(arr, kernel))
+    axarr[2].imshow(mask_eroded)
+    axarr[2].axis('off')
     plt.tight_layout()
     plt.show()
 

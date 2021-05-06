@@ -12,7 +12,7 @@ class TextureCompletionDataset(torch.utils.data.Dataset):
 
     def __init__(self, config, split):
         super().__init__()
-        self.views_per_shape = config.dataset.views_per_shape
+        self.views_per_shape = config.dataset.views_per_shape // (4 if (split == 'val_vis' or split == 'train_vis') else 1)
         self.texture_map_size = config.dataset.texture_map_size
         self.color_space = config.dataset.color_space
         self.from_rgb, self.to_rgb = TextureMapDataset.convert_cspace(config.dataset.color_space)

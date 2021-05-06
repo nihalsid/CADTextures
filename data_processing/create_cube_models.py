@@ -148,6 +148,53 @@ def create_partial_textures(dataset, num_views, proc, num_proc):
                 Image.fromarray(partial_texture.reshape(noc.shape)).save(folder / sample / f"partial_texture_{i:03d}.png")
 
 
+def create_partial_textures_reverse_lookup(dataset, num_views, proc, num_proc):
+    from scipy.spatial import cKDTree
+    dataset_0, dataset_1 = dataset.split('/')
+    folder = Path(f"data/{dataset_0}/{dataset_1}")
+    all_list = read_list(f'data/splits/{dataset_0}/{dataset_1}/official/all.txt')
+    all_list = [x for i, x in enumerate(all_list) if i % num_proc == proc]
+
+    for sample in tqdm(all_list):
+        if (folder / sample / "surface_texture.png").exists():
+            print(sample)
+            for i in range(num_views):
+                with Image.open(folder / sample / f"rgb_{i:03d}.png") as render_img:
+                    render = np.array(render_img)[:, :, :3]
+                with Image.open(folder / sample / f"noc_render_{i:03d}.png") as noc_render_img:
+                    noc_render = np.array(noc_render_img)[:, :, :3]
+                with Image.open(folder / sample / f"silhoutte_{i:03d}.png") as mask_render_img:
+                    mask_render = np.array(mask_render_img)
+                    mask_render = np.logical_and(np.logical_and(mask_render[:, :, 0] < 50, mask_render[:, :, 1] < 50), mask_render[:, :, 2] < 50)
+                render_flat = render.reshape((-1, 3))
+                noc_render_flat = noc_render.reshape((-1, 3))
+                indices_noc_render_flat = np.array(list(range(noc_render_flat.shape[0])))
+                mask_render_flat = mask_render.squeeze().ravel()
+                noc_render_flat = noc_render_flat[mask_render_flat, :]
+                kd_tree = cKDTree(noc_render_flat)
+                indices_noc_render_flat = indices_noc_render_flat[mask_render_flat]
+
+                with Image.open(folder / sample / f"noc.png") as noc_img:
+                    noc = np.array(noc_img)[:, :, :3]
+                mask_texture = np.logical_not(np.logical_and(np.logical_and(noc[:, :, 0] == 0, noc[:, :, 1] == 0), noc[:, :, 2] == 0))
+                noc_flat = noc.reshape((-1, 3))
+                indices_noc_flat = np.array(list(range(noc_flat.shape[0])))
+                mask_texture_flat = mask_texture.squeeze().ravel()
+                noc_flat = noc_flat[mask_texture_flat, :]
+                indices_noc_flat = indices_noc_flat[mask_texture_flat]
+
+                dist, indices = kd_tree.query(noc_flat, k=1)
+                closest_indices = indices_noc_render_flat[indices]
+                partial_texture = np.zeros_like(noc).reshape((-1, 3))
+                partial_texture_mask = np.zeros_like(noc).reshape((-1, 3))
+                partial_texture[indices_noc_flat, :] = render_flat[closest_indices, :]
+                partial_texture[indices_noc_flat[dist > 5], :] = 0
+                partial_texture_mask[indices_noc_flat, :] = 1
+                partial_texture_mask[indices_noc_flat[dist > 5], :] = 0
+                Image.fromarray(partial_texture.reshape(noc.shape)).save(folder / sample / f"inv_partial_texture_{i:03d}.png")
+                Image.fromarray((partial_texture_mask * 255).astype(np.uint8).reshape(noc.shape)).save(folder / sample / f"inv_partial_mask_{i:03d}.png")
+
+
 def create_texture_completion_task_data(dataset, patch_range, proc, num_proc):
     import torch
     from dataset.texture_map_dataset import TextureMapDataset
@@ -181,17 +228,17 @@ def create_texture_completion_task_data(dataset, patch_range, proc, num_proc):
 
 def run_partial_texture_proc():
     parser = ArgumentParser()
-    parser.add_argument('--dataset', default='3D-FUTURE/Sofa', type=str)
-    parser.add_argument('--num_views', default=24, type=int)
+    parser.add_argument('--dataset', default='SingleShape/CubeTextures', type=str)
+    parser.add_argument('--num_views', default=12, type=int)
     parser.add_argument('--num_proc', default=1, type=int)
     parser.add_argument('--proc', default=0, type=int)
     args = parser.parse_args()
-    create_partial_textures(args.dataset, args.num_views, args.proc, args.num_proc)
+    create_partial_textures_reverse_lookup(args.dataset, args.num_views, args.proc, args.num_proc)
 
 
 def run_texture_completion_proc():
     parser = ArgumentParser()
-    parser.add_argument('--dataset', default='3D-FUTURE/Sofa', type=str)
+    parser.add_argument('--dataset', default='SingleShape/CubeTextures', type=str)
     parser.add_argument('--patch_range', nargs='+', default=[70, 85])
     parser.add_argument('--num_proc', default=1, type=int)
     parser.add_argument('--proc', default=0, type=int)
@@ -200,4 +247,4 @@ def run_texture_completion_proc():
 
 
 if __name__ == "__main__":
-    run_texture_completion_proc()
+    run_partial_texture_proc()
