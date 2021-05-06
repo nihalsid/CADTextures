@@ -1,5 +1,6 @@
 from pathlib import Path
 import numpy as np
+from PIL import Image
 
 
 def read_list(path):
@@ -38,6 +39,16 @@ def apply_batch_color_transform_and_normalization(batch, items_color, items_non_
             batch[item][:, 2, :, :] = batch[item][:, 2, :, :] / 256
 
 
+def normalize_tensor_color(item, color_space):
+    if color_space == 'rgb':
+        item = item / 255 - 0.5
+    elif color_space == 'lab':
+        item[:, 0, :, :] = item[:, 0, :, :] / 100 - 0.5
+        item[:, 1, :, :] = item[:, 1, :, :] / 256
+        item[:, 2, :, :] = item[:, 2, :, :] / 256
+    return item
+
+
 def denormalize_and_rgb(arr, color_space, to_rgb_func, only_l):
     if color_space == 'rgb':
         arr = (arr + 0.5) * 255
@@ -49,3 +60,7 @@ def denormalize_and_rgb(arr, color_space, to_rgb_func, only_l):
             arr[:, :, 1] = np.clip(arr[:, :, 1] * 256, -128, 127)
             arr[:, :, 2] = np.clip(arr[:, :, 2] * 256, -128, 127)
     return np.clip(to_rgb_func(arr), 0, 255).astype(np.uint8)
+
+
+def resize_npy_as_image(npy, size):
+    return np.array(Image.fromarray(npy).resize((size, size)))

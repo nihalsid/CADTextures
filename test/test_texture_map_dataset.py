@@ -39,7 +39,7 @@ def test_texture_completion_dataset(config, visualize):
 
 
 def test_texture_patch_dataset(config, visualize):
-    dataset = TexturePatchDataset(config, "dtd-cracked_cracked_0004", 0, 50, 4)
+    dataset = TexturePatchDataset(config, "dtd-cracked_cracked_0004", 0, 25 * 3, 4)
     dataloader = DataLoader(dataset, batch_size=4, shuffle=False, num_workers=4, pin_memory=True)
     for batch in tqdm(dataloader):
         dataset.apply_batch_transforms(batch)
@@ -62,7 +62,7 @@ def main_test_texture_completion_ds(config):
     test_texture_completion_dataset(config, True)
 
 
-@hydra.main(config_path='../config', config_name='gan_conditional')
+@hydra.main(config_path='../config', config_name='gan_optimize')
 def main_test_texture_patch_ds(config):
     test_texture_patch_dataset(config, True)
 

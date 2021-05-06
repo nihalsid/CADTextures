@@ -30,13 +30,9 @@ class TexturePatchDataset(torch.utils.data.Dataset):
             mask_im.thumbnail((self.texture_map_size, self.texture_map_size))
             self.partial_mask = np.array(mask_im)[:, :, 0] > 0
         self.patch_size = patch_size
-        kernel_size = patch_size
-        kernel = cv.getStructuringElement(cv.MORPH_RECT, (kernel_size, kernel_size), (kernel_size // 2, kernel_size // 2))
-        self.mask_eroded_input = np.array(cv.erode(self.partial_mask.astype(np.uint8), kernel))
+        self.mask_eroded_input = TextureMapDataset.get_valid_sampling_area(torch.from_numpy(self.partial_mask).unsqueeze(0).unsqueeze(0), patch_size * 2 // 3).squeeze().numpy()
         self.non_zero_input = np.nonzero(self.mask_eroded_input)
-        kernel_size = patch_size * 3 // 2
-        kernel = cv.getStructuringElement(cv.MORPH_RECT, (kernel_size, kernel_size), (kernel_size // 2, kernel_size // 2))
-        self.mask_eroded_target = np.array(cv.erode(self.mask_texture.astype(np.uint8), kernel))
+        self.mask_eroded_target = TextureMapDataset.get_valid_sampling_area(torch.from_numpy(self.mask_texture).unsqueeze(0).unsqueeze(0), patch_size).squeeze().numpy()
         self.non_zero_target = np.nonzero(self.mask_eroded_target)
         self.mask_missing = np.logical_and(np.logical_not(self.partial_mask), self.mask_texture)
         self.size = dataset_size

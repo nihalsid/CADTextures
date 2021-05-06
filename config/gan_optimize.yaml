@@ -1,0 +1,41 @@
+defaults:
+  - dataset: single_cube_textures
+  - inputs: 2d_partial_texture
+  - model: singlecube_colors
+
+shape: dtd-cracked_cracked_0004
+view_index: 0
+
+model:
+  discriminator_ngf: ${model.input_texture_ngf}
+
+experiment: fast_dev
+seed: null
+wandb_main: False
+suffix: ''
+save_epoch: 1
+sanity_steps: 1
+max_epoch: 10000
+val_check_percent: 1.0
+val_check_interval: 1
+resume: null
+
+batch_size: 8
+num_workers: 8
+lr: 0.0001
+lambda_content: 0.075
+lambda_style: 0.0075
+lambda_g: 1
+lambda_g_local: 1
+lambda_gp: 10
+gan_loss_type: wgan_gp
+
+num_patches: 5
+patch_size: 25
+generator: texture
+
+hydra:
+  output_subdir: null # Disable saving of config files. We'll do that ourselves.
+  run:
+    dir: .
+
