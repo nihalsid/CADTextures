@@ -5,7 +5,7 @@ import random
 from PIL import Image
 
 from dataset.texture_map_dataset import TextureMapDataset
-from util.misc import read_list
+from util.misc import read_list, move_batch_to_gpu, apply_batch_color_transform_and_normalization
 
 
 class TextureCompletionDataset(torch.utils.data.Dataset):
@@ -26,33 +26,16 @@ class TextureCompletionDataset(torch.utils.data.Dataset):
             self.items = self.items * multiplier
 
     def apply_batch_transforms(self, batch):
-        items_color = ['target', 'input']
-        if self.color_space == 'rgb':
-            for item in items_color:
-                batch[item] = batch[item] / 255 - 0.5
-        elif self.color_space == 'lab':
-            for item in items_color:
-                batch[item][:, 0, :, :] = batch[item][:, 0, :, :] / 100 - 0.5
-                batch[item][:, 1, :, :] = batch[item][:, 1, :, :] / 256
-                batch[item][:, 2, :, :] = batch[item][:, 2, :, :] / 256
+        apply_batch_color_transform_and_normalization(batch, ['target', 'input'], [], self.color_space)
         batch['target'] = TextureMapDataset.apply_mask_texture(batch['target'], batch['mask'])
         batch['input'] = TextureMapDataset.apply_mask_texture(batch['input'], batch['mask'])
 
     @staticmethod
     def move_batch_to_gpu(batch, device):
-        batch['target'] = batch['target'].to(device)
-        batch['input'] = batch['input'].to(device)
-        batch['mask'] = batch['mask'].to(device)
-        batch['missing'] = batch['missing'].to(device)
+        move_batch_to_gpu(batch, device, ['target', 'input', 'mask', 'missing'])
 
     def denormalize_and_rgb(self, arr):
-        if self.color_space == 'rgb':
-            arr = (arr + 0.5) * 255
-        elif self.color_space == 'lab':
-            arr[:, :, 0] = np.clip((arr[:, :, 0] + 0.5) * 100, 0, 100)
-            arr[:, :, 1] = np.clip(arr[:, :, 1] * 256, -128, 127)
-            arr[:, :, 2] = np.clip(arr[:, :, 2] * 256, -128, 127)
-        return np.clip(self.to_rgb(arr), 0, 255).astype(np.uint8)
+        return denormalize_and_rgb(arr, self.color_space, self.to_rgb, False)
 
     def __getitem__(self, index):
         view_index = index % self.views_per_shape

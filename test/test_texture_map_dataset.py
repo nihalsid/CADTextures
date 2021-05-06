@@ -5,6 +5,7 @@ import hydra
 
 from dataset.texture_completion_dataset import TextureCompletionDataset
 from dataset.texture_map_dataset import TextureMapDataset
+from dataset.texture_patch_dataset import TexturePatchDataset
 from util.timer import Timer
 
 
@@ -37,6 +38,20 @@ def test_texture_completion_dataset(config, visualize):
                 dataset.visualize_sample_pyplot(batch['input'][ii].numpy(), batch['target'][ii].numpy(), batch['mask'][ii].numpy(), batch['missing'][ii].numpy())
 
 
+def test_texture_patch_dataset(config, visualize):
+    dataset = TexturePatchDataset(config, "dtd-cracked_cracked_0004", 0, 50, 4)
+    dataloader = DataLoader(dataset, batch_size=4, shuffle=False, num_workers=4, pin_memory=True)
+    for batch in tqdm(dataloader):
+        dataset.apply_batch_transforms(batch)
+        TexturePatchDataset.move_batch_to_gpu(batch, torch.device('cuda'))
+    if visualize:
+        for batch_idx, batch in enumerate(tqdm(dataloader)):
+            dataset.apply_batch_transforms(batch)
+            generated = dataset.get_patch_from_tensor(batch['target'])
+            for ii in range(batch['target'].shape[0]):
+                dataset.visualize_sample_pyplot(batch['input'][ii].numpy(), batch['target'][ii].numpy(), batch['mask_texture'][ii].numpy(), batch['mask_missing'][ii].numpy(), batch['input_patch'][ii].numpy(), generated[ii].numpy())
+
+
 @hydra.main(config_path='../config', config_name='base')
 def main_test_texture_map_ds(config):
     test_texture_map_dataset(config, True)
@@ -47,5 +62,10 @@ def main_test_texture_completion_ds(config):
     test_texture_completion_dataset(config, True)
 
 
+@hydra.main(config_path='../config', config_name='gan_conditional')
+def main_test_texture_patch_ds(config):
+    test_texture_patch_dataset(config, True)
+
+
 if __name__ == '__main__':
-    main_test_texture_completion_ds()
+    main_test_texture_patch_ds()

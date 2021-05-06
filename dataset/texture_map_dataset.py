@@ -5,7 +5,7 @@ from PIL import Image
 from torch.utils.data.dataset import Dataset
 from tqdm import tqdm
 from pathlib import Path
-from util.misc import read_list
+from util.misc import read_list, move_batch_to_gpu, apply_batch_color_transform_and_normalization
 import numpy as np
 from colorspacious import cspace_convert
 
@@ -126,16 +126,7 @@ class TextureMapDataset(Dataset):
     def apply_batch_transforms(self, batch):
         items_color = ['texture', 'render', 'partial_texture']
         items_non_color = ['normal', 'noc', 'noc_render']
-        for item in items_non_color:
-            batch[item] = batch[item] / 255 - 0.5
-        if self.color_space == 'rgb':
-            for item in items_color:
-                batch[item] = batch[item] / 255 - 0.5
-        elif self.color_space == 'lab':
-            for item in items_color:
-                batch[item][:, 0, :, :] = batch[item][:, 0, :, :] / 100 - 0.5
-                batch[item][:, 1, :, :] = batch[item][:, 1, :, :] / 256
-                batch[item][:, 2, :, :] = batch[item][:, 2, :, :] / 256
+        apply_batch_color_transform_and_normalization(batch, items_color, items_non_color, self.color_space)
         batch['texture'] = self.apply_mask_texture(batch['texture'], batch['mask_texture'])
 
     @staticmethod
@@ -166,16 +157,10 @@ class TextureMapDataset(Dataset):
 
     @staticmethod
     def move_batch_to_gpu(batch, device):
-        batch['texture'] = batch['texture'].to(device)
-        batch['normal'] = batch['normal'].to(device)
-        batch['noc'] = batch['noc'].to(device)
-        batch['noc_render'] = batch['noc_render'].to(device)
-        batch['mask_texture'] = batch['mask_texture'].to(device)
-        batch['render'] = batch['render'].to(device)
-        batch['mask_render'] = batch['mask_render'].to(device)
-        batch['partial_texture'] = batch['partial_texture'].to(device)
+        keys = ['texture', 'normal', 'noc', 'noc_render', 'mask_texture', 'render', 'mask_render', 'partial_texture']
         if type(batch['df']) != list:
-            batch['df'] = batch['df'].to(device)
+            keys.append('df')
+        move_batch_to_gpu(batch, device, keys)
 
     def visualize_sample_pyplot(self, texture, normal, noc, mask_texture, render, noc_render, mask_render, partial_texture):
         import matplotlib.pyplot as plt

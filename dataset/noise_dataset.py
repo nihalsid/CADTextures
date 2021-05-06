@@ -6,7 +6,7 @@ import random
 from PIL import Image
 
 from dataset.texture_map_dataset import TextureMapDataset
-from util.misc import read_list
+from util.misc import read_list, apply_batch_color_transform_and_normalization, denormalize_and_rgb
 
 
 class NoiseDataset(torch.utils.data.Dataset):
@@ -23,24 +23,10 @@ class NoiseDataset(torch.utils.data.Dataset):
         self.items = [x for x in item_list if (self.path_to_dataset / x / 'surface_texture.png').exists()]
 
     def apply_batch_transform(self, batch):
-        if self.color_space == 'rgb':
-            batch['target'] = batch['target'] / 255 - 0.5
-        elif self.color_space == 'lab':
-            batch['target'][:, 0, :, :] = batch['target'][:, 0, :, :] / 100 - 0.5
-            batch['target'][:, 1, :, :] = batch['target'][:, 1, :, :] / 256
-            batch['target'][:, 2, :, :] = batch['target'][:, 2, :, :] / 256
+        apply_batch_color_transform_and_normalization(batch, ['target'], [], self.color_space)
 
     def denormalize_and_rgb(self, arr, only_l):
-        if self.color_space == 'rgb':
-            arr = (arr + 0.5) * 255
-        elif self.color_space == 'lab':
-            arr[:, :, 0] = np.clip((arr[:, :, 0] + 0.5) * 100, 0, 100)
-            if only_l:
-                arr[:, :, 1:] = 0
-            else:
-                arr[:, :, 1] = np.clip(arr[:, :, 1] * 256, -128, 127)
-                arr[:, :, 2] = np.clip(arr[:, :, 2] * 256, -128, 127)
-        return np.clip(self.to_rgb(arr), 0, 255).astype(np.uint8)
+        return denormalize_and_rgb(arr, self.color_space, self.to_rgb, only_l)
 
     def __getitem__(self, index):
         random_noise = np.random.normal(0, 1, size=self.z_dim).astype(np.float32)
