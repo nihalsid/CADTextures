@@ -22,7 +22,7 @@ class RetrievalTrainingModule(pl.LightningModule):
         self.preload_dict = {}
         assert config.dataset.texture_map_size == 128, "only 128x128 texture map supported"
         self.fenc_input, self.fenc_target = Patch16(config.fenc_nf, config.fenc_zdim), Patch16(config.fenc_nf, config.fenc_zdim)
-        self.nt_xent_loss = NTXentLoss(config.temprature, True)
+        self.nt_xent_loss = NTXentLoss(float(config.temperature), True)
         self.current_learning_rate = config.lr
         self.retrieval_handler = RetrievalInterface(config.dictionary, config.fenc_zdim)
         self.dataset = lambda split: TextureMapDataset(config, split, self.preload_dict)
@@ -88,21 +88,23 @@ class RetrievalTrainingModule(pl.LightningModule):
         ds_val.set_all_view_indexing(True)
         ds_vis.set_all_view_indexing(True)
         ds_train_eval.set_all_view_indexing(True)
-        print('[Eval-Train]')
-        train_eval_retrievals = self.retrieval_handler.create_mapping_and_retrieve_nearest_textures_for_all(self.fenc_input, output_dir, ds_train_eval, ds_train_eval, 1, True)
-        t_err = retrieval.get_error_retrieval(train_eval_retrievals, ds_train_eval)
-        print(f"Train Error: {t_err:.3f}\n")
-        self.log("train/loss_l1", t_err, on_step=False, on_epoch=True, prog_bar=False, logger=True)
+        # remove train eval since it takes too long
+        # print('[Eval-Train]')
+        # train_eval_retrievals = self.retrieval_handler.create_mapping_and_retrieve_nearest_textures_for_all(self.fenc_input, output_dir, ds_train, ds_train_eval, 1, True)
+        # t_err = retrieval.get_error_retrieval(train_eval_retrievals, ds_train_eval)
+        # print(f"Train Error: {t_err:.3f}\n")
+        # self.log("train/loss_l1", t_err, on_step=False, on_epoch=True, prog_bar=False, logger=True)
         print('[Eval-Train-GT]')
-        train_eval_retrievals = self.retrieval_handler.create_mapping_and_retrieve_nearest_textures_for_all(self.fenc_input, output_dir, ds_train_eval, ds_train_eval, 1, False)
+        train_eval_retrievals = self.retrieval_handler.create_mapping_and_retrieve_nearest_textures_for_all(self.fenc_input, output_dir, ds_train, ds_train_eval, 1, False)
         t_err = retrieval.get_error_retrieval(train_eval_retrievals, ds_train_eval)
         print(f"Train-GT Error: {t_err:.3f}\n")
         self.log("traingt/loss_l1", t_err, on_step=False, on_epoch=True, prog_bar=False, logger=True)
         print('[Eval-Validation]')
-        val_retrievals = self.retrieval_handler.create_mapping_and_retrieve_nearest_textures_for_all(self.fenc_input, output_dir, ds_train_eval, ds_val, 1, False)
+        val_retrievals = self.retrieval_handler.create_mapping_and_retrieve_nearest_textures_for_all(self.fenc_input, output_dir, ds_train, ds_val, 1, False)
         v_err = retrieval.get_error_retrieval(val_retrievals, ds_val)
+        self.log("val/loss_l1", v_err, on_step=False, on_epoch=True, prog_bar=False, logger=True)
         print(f"Val Error: {v_err:.3f}\n")
-        vis_retrievals = self.retrieval_handler.create_mapping_and_retrieve_nearest_textures_for_all(self.fenc_input, output_dir, ds_train_eval, ds_vis, 1, False)
+        vis_retrievals = self.retrieval_handler.create_mapping_and_retrieve_nearest_textures_for_all(self.fenc_input, output_dir, ds_train, ds_vis, 1, False)
         for idx in range(vis_retrievals.shape[0]):
             vis_image = np.ones((128, 2 * 128 + 20, 3), dtype=np.uint8) * 255
             retrieved_texture = ds_vis.convert_data_for_visualization([vis_retrievals[idx, 0].cpu().numpy()], [], [])[0][0]

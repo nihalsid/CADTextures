@@ -58,20 +58,17 @@ def extract_features(feature_extractor, dictionary_config, latent_dim, dataset, 
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=dictionary_config.batch_size, shuffle=False, num_workers=dictionary_config.num_workers, drop_last=False)
     patch_names = []
     with torch.no_grad():
-        f_idx = 0
         for i, item in enumerate(tqdm(dataloader, desc='query_features')):
             dataset.apply_batch_transforms(item)
             item[key] = item[key].cuda()
             prediction = torch.nn.functional.normalize(feature_extractor(item[key]), dim=1).cpu().numpy()
+            features[(i * dictionary_config.batch_size) * num_patch_x ** 2: (i * dictionary_config.batch_size + item[key].shape[0]) * num_patch_x ** 2, :] = prediction
             for batch_idx in range(item[key].shape[0]):
                 for p_y in range(num_patch_x):
                     for p_x in range(num_patch_x):
-                        embedding = prediction[batch_idx * num_patch_x ** 2 + p_y * num_patch_x + p_x]
                         x_start, x_end = p_x * dictionary_config.patch_size, (p_x + 1) * dictionary_config.patch_size
                         y_start, y_end = p_y * dictionary_config.patch_size, (p_y + 1) * dictionary_config.patch_size
                         patch_names.append(f"{item['name'][batch_idx]}__{item['view_index'][batch_idx]:02d}__{x_start:03d}__{x_end:03d}__{y_start:03d}__{y_end:03d}")
-                        features[f_idx, :] = embedding
-                        f_idx += 1
     return patch_names, features
 
 

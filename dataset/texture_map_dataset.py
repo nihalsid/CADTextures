@@ -49,13 +49,19 @@ class TextureMapDataset(Dataset):
                         'mask_render': mask_render_list,
                         'partial_texture': partial_texture_list
                     }
+        elif config.dictionary is not None:  # retrieval task
+            for index in tqdm(range(len(self.items)), desc=f'preload_texmaps_{split}'):
+                if self.items[index] not in self.preload_dict:
+                    self.preload_dict[self.items[index]] = {
+                        'texture': self.get_texture(self.items[index])
+                    }
 
         if config.dataset.splits_dir.startswith('overfit'):
             multiplier = 240 if split == 'train' else 24
             self.items = self.items * multiplier
 
     def load_view_independent_data_from_disk(self, item_index):
-        item = self.items[item_index]
+        item, _ = self.get_item_and_view_idx(item_index)
         df_path = self.path_to_dataset / item / "shape_df.npz"
         texture_path = self.path_to_dataset / item / "surface_texture.png"
         normal_path = self.path_to_dataset / item / "surface_normals.png"
@@ -72,8 +78,9 @@ class TextureMapDataset(Dataset):
             mask_texture = np.logical_not(np.logical_and(np.logical_and(noc[:, :, 0] == 0, noc[:, :, 1] == 0), noc[:, :, 2] == 0))
         return df, np.ascontiguousarray(np.transpose(texture, (2, 0, 1))), np.ascontiguousarray(np.transpose(normal, (2, 0, 1))), np.ascontiguousarray(np.transpose(noc, (2, 0, 1))), mask_texture[np.newaxis, :, :]
 
-    def load_view_dependent_data_from_disk(self, item_index, view_index):
-        item = self.items[item_index]
+    def load_view_dependent_data_from_disk(self, item_index, forced_view_index=None):
+        item, view_index = self.get_item_and_view_idx(item_index)
+        view_index = view_index if forced_view_index is None else forced_view_index
         image_path = self.path_to_dataset / item / f"rgb_{view_index:03d}.png"
         noc_render_path = self.path_to_dataset / item / f"noc_render_{view_index:03d}.png"
         mask_path = self.path_to_dataset / item / f"silhoutte_{view_index:03d}.png"
@@ -104,7 +111,7 @@ class TextureMapDataset(Dataset):
             partial_texture = partial_texture_list[view_index]
         else:
             df, texture, normal, noc, mask_texture = self.load_view_independent_data_from_disk(index)
-            render, noc_render, mask_render, partial_texture = self.load_view_dependent_data_from_disk(index, view_index)
+            render, noc_render, mask_render, partial_texture = self.load_view_dependent_data_from_disk(index)
 
         return {
             'name': f'{item}',
