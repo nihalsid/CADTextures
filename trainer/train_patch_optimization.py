@@ -34,7 +34,7 @@ class PatchOptimizationTrainer(pl.LightningModule):
         if self.hparams.generator == 'cnn':
             opt_g = torch.optim.Adam(self.generator.parameters(), lr=self.hparams.lr, betas=(0.5, 0.999))
         else:
-            opt_g = torch.optim.Adam([self.texture.requires_grad_(True)], lr=self.hparams.lr * 100, betas=(0.5, 0.999))
+            opt_g = torch.optim.Adam([self.texture.requires_grad_(True)], lr=self.hparams.lr * 10, betas=(0.5, 0.999))
         opt_d = torch.optim.Adam(self.discriminator.parameters(), lr=self.hparams.lr, betas=(0.5, 0.999))
         return [opt_g, opt_d], []
 
@@ -46,8 +46,8 @@ class PatchOptimizationTrainer(pl.LightningModule):
 
     def forward(self, batch):
         if self.hparams.generator == 'cnn':
-            return self.generator(torch.cat([batch['input'], batch['mask_texture'], batch['mask_missing']], 1))
-        return torch.clamp(self.texture.expand((batch['input'].shape[0], -1, -1, -1)), -0.5, 0.5)
+            return self.generator(torch.zeros_like(torch.cat([batch['input'], batch['mask_texture'], batch['mask_missing']], 1)))
+        return self.texture.expand((batch['input'].shape[0], -1, -1, -1))
 
     def training_step(self, batch, batch_idx, optimizer_idx):
         if optimizer_idx == 0:

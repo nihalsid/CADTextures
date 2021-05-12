@@ -22,6 +22,7 @@ class TextureMapDataset(Dataset):
         self.from_rgb, self.to_rgb = self.convert_cspace(config.dataset.color_space)
         self.load_distance_field = 'distance_field' in config.inputs
         self.path_to_dataset = Path(config.dataset.data_dir) / config.dataset.name
+        self.all_view_indexing_mode = False
         splits_file = Path(config.dataset.data_dir) / 'splits' / config.dataset.name / config.dataset.splits_dir / f'{split}.txt'
         item_list = read_list(splits_file)
         # sanity filter
@@ -92,12 +93,8 @@ class TextureMapDataset(Dataset):
         noc_render = noc_render[:, :, :3]
         return np.ascontiguousarray(np.transpose(render, (2, 0, 1))), np.ascontiguousarray(np.transpose(noc_render, (2, 0, 1))), mask_render[np.newaxis, :, :], np.ascontiguousarray(np.transpose(partial_texture, (2, 0, 1)))
 
-    def __len__(self):
-        return len(self.items)
-
     def __getitem__(self, index):
-        item = self.items[index]
-        view_index = random.randint(0, self.views_per_shape - 1)
+        item, view_index = self.get_item_and_view_idx(index)
         if self.preload:
             df, texture, normal, noc, mask_texture = self.preload_dict[item]['df'], self.preload_dict[item]['texture'], self.preload_dict[item]['normal'], self.preload_dict[item]['noc'], self.preload_dict[item]['mask_texture']
             render_list, noc_render_list, mask_render_list, partial_texture_list = self.preload_dict[item]['render'], self.preload_dict[item]['noc_render'], self.preload_dict[item]['mask_render'], self.preload_dict[item]['partial_texture']
@@ -122,6 +119,9 @@ class TextureMapDataset(Dataset):
             'mask_render': mask_render.astype(np.float32),
             'partial_texture': partial_texture
         }
+
+    def __len__(self):
+        return len(self.items) * (self.views_per_shape if self.all_view_indexing_mode else 1)
 
     def apply_batch_transforms(self, batch):
         items_color = ['texture', 'render', 'partial_texture']
@@ -227,3 +227,24 @@ class TextureMapDataset(Dataset):
                     sampled_generated = tensors[tid][b: b + 1, :, samples[0][k]: samples[0][k] + patch_size, samples[1][k]: samples[1][k] + patch_size]
                     all_samples[tid].append(sampled_generated)
         return [torch.cat(all_samples[tid], dim=0) for tid in range(len(tensors))]
+
+    def get_item_and_view_idx(self, index):
+        if self.all_view_indexing_mode:
+            item = self.items[index // self.views_per_shape]
+            view_index = index % self.views_per_shape
+        else:
+            item = self.items[index]
+            view_index = random.randint(0, self.views_per_shape - 1)
+        return item, view_index
+
+    def set_all_view_indexing(self, value):
+        self.all_view_indexing_mode = value
+
+    def get_texture(self, name):
+        if name in self.preload_dict:
+            texture = self.preload_dict[name]['texture']
+            return texture.copy()
+        texture_path = self.path_to_dataset / name / "surface_texture.png"
+        with Image.open(texture_path) as texture_im:
+            texture = self.from_rgb(TextureMapDataset.process_to_padded_thumbnail(texture_im, self.texture_map_size)).astype(np.float32)
+        return np.ascontiguousarray(np.transpose(texture, (2, 0, 1)))

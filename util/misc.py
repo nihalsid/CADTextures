@@ -1,5 +1,7 @@
+from collections import OrderedDict
 from pathlib import Path
 import numpy as np
+import torch
 from PIL import Image
 
 
@@ -64,3 +66,23 @@ def denormalize_and_rgb(arr, color_space, to_rgb_func, only_l):
 
 def resize_npy_as_image(npy, size):
     return np.array(Image.fromarray(npy).resize((size, size)))
+
+
+def to_underscore(s):
+    return '__'.join(s.split('/'))
+
+
+def rename_state_dict(state_dict, key):
+    new_state_dict = OrderedDict()
+    for k in state_dict:
+        if k.startswith(key):
+            new_state_dict[".".join(k.split(".")[1:])] = state_dict[k]
+    return new_state_dict
+
+
+def load_net_for_eval(net, ckpt_path, rename_prefix):
+    # ckpt = torch.load(ckpt_path, map_location='cuda:0')
+    # net.load_state_dict(rename_state_dict(ckpt['state_dict'], rename_prefix))
+    net = net.cuda()
+    net.eval()
+    return net

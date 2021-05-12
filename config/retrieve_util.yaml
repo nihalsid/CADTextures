@@ -1,0 +1,24 @@
+defaults:
+  - dataset: single_cube
+  - inputs: 2d_only_partial_texture
+mode:
+  - compose
+
+num_proc: 1
+proc: 0
+retrieval_dir: data/
+retrieval_ckpt: /cluster_HDD/gondor/ysiddiqui/repatch/runs/03022058_3DFront_base_1000/_ckpt_epoch=79.ckpt
+fenc_nf: 32
+fenc_zdim: 128
+
+dictionary:
+  patch_size: 16
+  K: 8
+  flann_num_workers: 0
+  batch_size: 8
+  num_workers: 0
+
+hydra:
+  output_subdir: null # Disable saving of config files. We'll do that ourselves.
+  run:
+    dir: .

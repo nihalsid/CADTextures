@@ -1,6 +1,7 @@
 import torch
 
 from model.discriminator import SanityTestDiscriminator, TextureGANDiscriminator, TextureGANDiscriminatorSlim
+from model.retrieval import Patch16
 from model.texture_gan import ResidualBlock, Scribbler, ImageFusionScribblerSlim, ImageAnd3dFusionScribbler, ScribblerGenerator, ScribblerSlim, TextureGAN, TextureGANSlim
 from util.misc import print_model_parameter_count
 
@@ -71,5 +72,12 @@ def test_textureganslim_generator():
     print_model_parameter_count(model)
 
 
+def test_patch16_retrieval():
+    model = Patch16(32, 128)
+    t = torch.randn(8, 3, 128, 128)
+    print(model(t).shape)
+    print_model_parameter_count(model)
+
+
 if __name__ == "__main__":
-    test_discriminator()
+    test_patch16_retrieval()
