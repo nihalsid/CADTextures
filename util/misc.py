@@ -81,8 +81,8 @@ def rename_state_dict(state_dict, key):
 
 
 def load_net_for_eval(net, ckpt_path, rename_prefix):
-    # ckpt = torch.load(ckpt_path, map_location='cuda:0')
-    # net.load_state_dict(rename_state_dict(ckpt['state_dict'], rename_prefix))
+    ckpt = torch.load(ckpt_path, map_location='cuda:0')
+    net.load_state_dict(rename_state_dict(ckpt['state_dict'], rename_prefix))
     net = net.cuda()
     net.eval()
     return net

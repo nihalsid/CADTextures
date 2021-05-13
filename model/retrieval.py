@@ -35,7 +35,7 @@ class Patch16(nn.Module):
         super().__init__()
         # noinspection PyTypeChecker
         self.backbone = nn.Sequential(
-            Double3x3Conv2d(3, nf),
+            Double3x3Conv2d(1, nf),
             Double3x3Conv2d(nf, nf * 2),
             Double3x3Conv2d(nf * 2, nf * 4),
             Double3x3Conv2d(nf * 4, nf * 8),

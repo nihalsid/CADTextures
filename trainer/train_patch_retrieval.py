@@ -54,8 +54,8 @@ class RetrievalTrainingModule(pl.LightningModule):
         return torch.utils.data.DataLoader(dataset, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, drop_last=False, pin_memory=True)
 
     def forward(self, batch):
-        features_in = self.fenc_input(batch['partial_texture'])
-        features_tgt = self.fenc_target(batch['texture'])
+        features_in = self.fenc_input(batch['partial_texture'][:, 0:1, :, :])
+        features_tgt = self.fenc_target(batch['texture'][:, 0:1, :, :])
         return features_in, features_tgt
 
     def step(self, batch):
@@ -106,11 +106,12 @@ class RetrievalTrainingModule(pl.LightningModule):
         print(f"Val Error: {v_err:.3f}\n")
         vis_retrievals = self.retrieval_handler.create_mapping_and_retrieve_nearest_textures_for_all(self.fenc_input, output_dir, ds_train, ds_vis, 1, False)
         for idx in range(vis_retrievals.shape[0]):
-            vis_image = np.ones((128, 2 * 128 + 20, 3), dtype=np.uint8) * 255
+            vis_image = np.ones((128, 3 * 128 + 40, 3), dtype=np.uint8) * 255
             retrieved_texture = ds_vis.convert_data_for_visualization([vis_retrievals[idx, 0].cpu().numpy()], [], [])[0][0]
             item, view_idx = ds_vis.get_item_and_view_idx(idx)
-            vis_image[:, :128, :] = (np.clip(ds_vis.to_rgb(np.transpose(ds_vis.get_texture(item), (1, 2, 0))), 0, 255)).astype(np.uint8)
-            vis_image[:, 148:, :] = (retrieved_texture * 255).astype(np.uint8)
+            vis_image[:, :128, :] = (np.clip(ds_vis.to_rgb(np.transpose(ds_vis.get_partial_texture(item, view_idx), (1, 2, 0))), 0, 255)).astype(np.uint8)
+            vis_image[:, 148: 276, :] = (np.clip(ds_vis.to_rgb(np.transpose(ds_vis.get_texture(item), (1, 2, 0))), 0, 255)).astype(np.uint8)
+            vis_image[:, 296:, :] = (retrieved_texture * 255).astype(np.uint8)
             Image.fromarray(vis_image).save(output_dir / "val_vis" / f"{item}__{view_idx}.png")
 
 

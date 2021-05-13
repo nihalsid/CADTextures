@@ -84,7 +84,7 @@ class TextureMapDataset(Dataset):
         image_path = self.path_to_dataset / item / f"rgb_{view_index:03d}.png"
         noc_render_path = self.path_to_dataset / item / f"noc_render_{view_index:03d}.png"
         mask_path = self.path_to_dataset / item / f"silhoutte_{view_index:03d}.png"
-        partial_texture_path = self.path_to_dataset / item / f"partial_texture_{view_index:03d}.png"
+        partial_texture_path = self.path_to_dataset / item / f"inv_partial_texture_{view_index:03d}.png"
         with Image.open(image_path) as render_im:
             render = self.from_rgb(np.array(render_im)).astype(np.float32)
         with Image.open(noc_render_path) as render_noc:
@@ -255,3 +255,16 @@ class TextureMapDataset(Dataset):
         with Image.open(texture_path) as texture_im:
             texture = self.from_rgb(TextureMapDataset.process_to_padded_thumbnail(texture_im, self.texture_map_size)).astype(np.float32)
         return np.ascontiguousarray(np.transpose(texture, (2, 0, 1)))
+
+    def get_mask(self, name):
+        noc_path = self.path_to_dataset / name / "noc.png"
+        with Image.open(noc_path) as noc_im:
+            noc = TextureMapDataset.process_to_padded_thumbnail(noc_im, self.texture_map_size)
+            mask_texture = np.logical_not(np.logical_and(np.logical_and(noc[:, :, 0] == 0, noc[:, :, 1] == 0), noc[:, :, 2] == 0))
+        return mask_texture[np.newaxis, :, :]
+
+    def get_partial_texture(self, name, view_index):
+        partial_texture_path = self.path_to_dataset / name / f"inv_partial_texture_{view_index:03d}.png"
+        with Image.open(partial_texture_path) as partial_tex:
+            partial_texture = self.from_rgb(TextureMapDataset.process_to_padded_thumbnail(partial_tex, self.texture_map_size)).astype(np.float32)
+        return np.ascontiguousarray(np.transpose(partial_texture, (2, 0, 1)))

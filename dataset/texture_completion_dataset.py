@@ -5,7 +5,7 @@ import random
 from PIL import Image
 
 from dataset.texture_map_dataset import TextureMapDataset
-from util.misc import read_list, move_batch_to_gpu, apply_batch_color_transform_and_normalization
+from util.misc import read_list, move_batch_to_gpu, apply_batch_color_transform_and_normalization, denormalize_and_rgb
 
 
 class TextureCompletionDataset(torch.utils.data.Dataset):

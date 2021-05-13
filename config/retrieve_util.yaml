@@ -1,13 +1,14 @@
 defaults:
-  - dataset: single_cube
+  - dataset: single_cube_textures
   - inputs: 2d_only_partial_texture
+
 mode:
-  - compose
+  - visualize
 
 num_proc: 1
 proc: 0
 retrieval_dir: data/
-retrieval_ckpt: /cluster_HDD/gondor/ysiddiqui/repatch/runs/03022058_3DFront_base_1000/_ckpt_epoch=79.ckpt
+retrieval_ckpt: runs/12052106_retrieval_base_t0.2_1view/_ckpt_epoch=2474.ckpt
 fenc_nf: 32
 fenc_zdim: 128
 

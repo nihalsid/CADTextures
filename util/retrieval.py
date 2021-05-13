@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from pyflann import *
 import torch.utils.data
+from PIL import Image
 
 from dataset.texture_map_dataset import TextureMapDataset
 from model.retrieval import Patch16
@@ -28,7 +29,7 @@ def create_dictionary(feature_extractor, dictionary_config, latent_dim, dataset,
         for i, item in enumerate(tqdm(dataloader, desc='dict_feats')):
             dataset.apply_batch_transforms(item)
             target_patches = item['texture'].cuda()
-            prediction = feature_extractor(target_patches)
+            prediction = feature_extractor(target_patches[:, 0:1, :, :])
             prediction = torch.nn.functional.normalize(prediction, dim=1).cpu().numpy()
             for batch_idx in range(item['texture'].shape[0]):
                 for p_y in range(num_patch_x):
@@ -61,7 +62,7 @@ def extract_features(feature_extractor, dictionary_config, latent_dim, dataset, 
         for i, item in enumerate(tqdm(dataloader, desc='query_features')):
             dataset.apply_batch_transforms(item)
             item[key] = item[key].cuda()
-            prediction = torch.nn.functional.normalize(feature_extractor(item[key]), dim=1).cpu().numpy()
+            prediction = torch.nn.functional.normalize(feature_extractor(item[key][:, 0:1, :, :]), dim=1).cpu().numpy()
             features[(i * dictionary_config.batch_size) * num_patch_x ** 2: (i * dictionary_config.batch_size + item[key].shape[0]) * num_patch_x ** 2, :] = prediction
             for batch_idx in range(item[key].shape[0]):
                 for p_y in range(num_patch_x):
@@ -231,13 +232,14 @@ def retrievals_to_disk(mode, config, use_target_for_feats, num_proc=1, proc=0):
     tree_path = Path("runs", 'retrieval_scratch', to_underscore(config.dataset.name), config.dataset.splits_dir, ckpt_experiment, ckpt_epoch, str(config.dictionary.K))
     dataset_train = TextureMapDataset(config, 'train', preload_dict)
     dataset_val = TextureMapDataset(config, 'val', preload_dict)
+    dataset_vis = TextureMapDataset(config, 'val_vis', preload_dict)
 
     if mode == 'map':
         fenc_input, fenc_target = Patch16(config.fenc_nf, config.fenc_zdim), Patch16(config.fenc_nf, config.fenc_zdim)
         fenc_input = load_net_for_eval(fenc_input, Path(config.retrieval_ckpt), "fenc_input")
         fenc_target = load_net_for_eval(fenc_target, Path(config.retrieval_ckpt), "fenc_target")
         (retrievals_dir / "map").mkdir(exist_ok=True, parents=True)
-        # create_dictionary(fenc_target, config.dictionary, config.fenc_zdim, dataset_train, tree_path)
+        create_dictionary(fenc_target, config.dictionary, config.fenc_zdim, dataset_train, tree_path)
         retrieval_handler = RetrievalInterface(config.dictionary, config.fenc_zdim)
 
         fenc = fenc_input if not use_target_for_feats else fenc_target
@@ -255,6 +257,8 @@ def retrievals_to_disk(mode, config, use_target_for_feats, num_proc=1, proc=0):
             np.save(retrievals_dir / "map_val.npy", retrieval_mappings)
 
     elif mode == "compose":
+        dataset_train.set_all_view_indexing(True)
+        dataset_val.set_all_view_indexing(True)
         retrieval_handler = RetrievalInterface(config.dictionary, config.fenc_zdim)
         (retrievals_dir / "compose").mkdir(exist_ok=True, parents=True)
         map_name = ['map_train.npy', 'map_val.npy']
@@ -270,9 +274,31 @@ def retrievals_to_disk(mode, config, use_target_for_feats, num_proc=1, proc=0):
                 np.savez_compressed(retrievals_dir / "compose" / f"{texture_view}.npz", retrieval.numpy())
     elif mode == "evaluate":
         retrievals = []
-        for texture in tqdm(dataset_val.textures, desc='evaluate'):
+        texture_views = []
+        dataset_val.set_all_view_indexing(True)
+        for view_idx in range(dataset_val.views_per_shape):
+            texture_views.extend([f'{t}__{view_idx:02d}' for t in dataset_val.items])
+        for texture in tqdm(texture_views, desc='evaluate'):
             retrieval = np.load(retrievals_dir / 'compose' / f'{texture}.npz')["arr_0"]
             retrievals.append(retrieval[:1, :, :, :])
+        print(get_error_retrieval(torch.from_numpy(np.stack(retrievals, axis=0)), dataset_val))
+    elif mode == "visualize":
+        texture_views = []
+        dataset_vis.set_all_view_indexing(True)
+        (tree_path / "val_vis").mkdir(exist_ok=True)
+        for view_idx in range(dataset_vis.views_per_shape):
+            texture_views.extend([f'{t}__{view_idx:02d}' for t in dataset_vis.items])
+        for idx, texture in tqdm(enumerate(texture_views), desc='visualize'):
+            mask = dataset_vis.get_mask(texture.split('__')[0])
+            retrieval = np.load(retrievals_dir / 'compose' / f'{texture}.npz')["arr_0"]
+            vis_image = np.ones((128, (config.dictionary.K + 2) * 128 + (config.dictionary.K + 1) * 20, 3), dtype=np.uint8) * 255
+            for k in range(config.dictionary.K):
+                retrieved_texture = dataset_vis.convert_data_for_visualization([retrieval[k]], [], [])[0][0]
+                vis_image[:, (k + 2) * 148: (k + 2) * 148 + 128, :] = (retrieved_texture * mask.transpose((1, 2, 0)) * 255).astype(np.uint8)
+            item, view_idx = texture.split('__')[0], int(texture.split('__')[1])
+            vis_image[:, :128, :] = (np.clip(dataset_vis.to_rgb(np.transpose(dataset_vis.get_partial_texture(item, view_idx), (1, 2, 0))), 0, 255) * mask.transpose((1, 2, 0))).astype(np.uint8)
+            vis_image[:, 148: 148 + 128, :] = (np.clip(dataset_vis.to_rgb(np.transpose(dataset_vis.get_texture(item), (1, 2, 0))), 0, 255) * mask.transpose((1, 2, 0))).astype(np.uint8)
+            Image.fromarray(vis_image).save(tree_path / "val_vis" / f"{item}__{view_idx}.png")
 
 
 @hydra.main(config_path='../config', config_name='retrieve_util')
