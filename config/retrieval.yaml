@@ -26,7 +26,7 @@ val_check_interval: 30
 resume: null
 scheduler: null
 
-batch_size: 16
+batch_size: 12
 num_workers: 8
 lr: 0.0001
 

@@ -1,9 +1,9 @@
 defaults:
-  - dataset: single_cube_textures
+  - dataset: single_cube_dice
   - inputs: 2d_partial_texture
   - model: singlecube_colors
 
-shape: dtd-cracked_cracked_0004
+shape: "00000"
 view_index: 0
 
 model:

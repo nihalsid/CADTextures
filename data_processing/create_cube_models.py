@@ -228,7 +228,7 @@ def create_texture_completion_task_data(dataset, patch_range, proc, num_proc):
 
 def run_partial_texture_proc():
     parser = ArgumentParser()
-    parser.add_argument('--dataset', default='SingleShape/CubeTextures', type=str)
+    parser.add_argument('--dataset', default='SingleShape/CubeDice', type=str)
     parser.add_argument('--num_views', default=12, type=int)
     parser.add_argument('--num_proc', default=1, type=int)
     parser.add_argument('--proc', default=0, type=int)

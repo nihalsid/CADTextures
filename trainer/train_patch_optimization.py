@@ -19,7 +19,7 @@ class PatchOptimizationTrainer(pl.LightningModule):
 
     def __init__(self, config):
         super(PatchOptimizationTrainer, self).__init__()
-        self.hparams = config
+        self.save_hyperparameters(config)
         self.discriminator = TextureGANDiscriminatorLocal(3, self.hparams.model.discriminator_ngf)
         dataset = lambda size: TexturePatchDataset(self.hparams, self.hparams.shape, self.hparams.view_index, self.hparams.patch_size, size)
         self.train_dataset, self.val_dataset, self.val_vis_dataset = dataset(self.hparams.batch_size * 400), dataset(self.hparams.batch_size), dataset(self.hparams.batch_size)

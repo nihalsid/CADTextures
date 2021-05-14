@@ -18,7 +18,7 @@ class RetrievalTrainingModule(pl.LightningModule):
 
     def __init__(self, config):
         super(RetrievalTrainingModule, self).__init__()
-        self.hparams = config
+        self.save_hyperparameters(config)
         self.preload_dict = {}
         assert config.dataset.texture_map_size == 128, "only 128x128 texture map supported"
         self.fenc_input, self.fenc_target = Patch16(config.fenc_nf, config.fenc_zdim), Patch16(config.fenc_nf, config.fenc_zdim)
