@@ -54,8 +54,8 @@ class RetrievalTrainingModule(pl.LightningModule):
         return torch.utils.data.DataLoader(dataset, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, drop_last=False, pin_memory=True)
 
     def forward(self, batch):
-        features_in = self.fenc_input(batch['partial_texture'][:, 0:1, :, :])
-        features_tgt = self.fenc_target(batch['texture'][:, 0:1, :, :])
+        features_in = self.fenc_input(batch['partial_texture'])
+        features_tgt = self.fenc_target(batch['texture'])
         return features_in, features_tgt
 
     def step(self, batch):

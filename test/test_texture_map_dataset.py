@@ -52,7 +52,7 @@ def test_texture_patch_dataset(config, visualize):
                 dataset.visualize_sample_pyplot(batch['input'][ii].numpy(), batch['target'][ii].numpy(), batch['mask_texture'][ii].numpy(), batch['mask_missing'][ii].numpy(), batch['input_patch'][ii].numpy(), generated[ii].numpy())
 
 
-@hydra.main(config_path='../config', config_name='base')
+@hydra.main(config_path='../config', config_name='refinement')
 def main_test_texture_map_ds(config):
     test_texture_map_dataset(config, True)
 
@@ -68,4 +68,4 @@ def main_test_texture_patch_ds(config):
 
 
 if __name__ == '__main__':
-    main_test_texture_patch_ds()
+    main_test_texture_map_ds()

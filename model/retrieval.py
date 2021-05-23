@@ -35,7 +35,7 @@ class Patch16(nn.Module):
         super().__init__()
         # noinspection PyTypeChecker
         self.backbone = nn.Sequential(
-            Double3x3Conv2d(1, nf),
+            Double3x3Conv2d(3, nf),
             Double3x3Conv2d(nf, nf * 2),
             Double3x3Conv2d(nf * 2, nf * 4),
             Double3x3Conv2d(nf * 4, nf * 8),
@@ -50,3 +50,45 @@ class Patch16(nn.Module):
         unfolded = self.unfold(volume).squeeze(-1).squeeze(-1)
         return self.final_layer(unfolded)
 
+
+class Patch16Thin(nn.Module):
+
+    def __init__(self, nf, z_dim):
+        super().__init__()
+        # noinspection PyTypeChecker
+        self.backbone = nn.Sequential(
+            Double3x3Conv2d(3, nf),
+            Double3x3Conv2d(nf, nf * 2),
+            Double3x3Conv2d(nf * 2, nf * 4),
+            Double3x3Conv2d(nf * 4, nf * 8),
+        )
+        self.unfold = Unfold2D(1, nf * 8)
+        self.final_layer = nn.Linear(8 * nf, z_dim)
+
+    def forward(self, x):
+        volume = self.backbone(x)
+        unfolded = self.unfold(volume).squeeze(-1).squeeze(-1)
+        return self.final_layer(unfolded)
+
+
+class Patch16MLP(nn.Module):
+
+    def __init__(self, nf, z_dim):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            nn.Linear(3 * 16**2, nf * 4),
+            nn.ReLU(),
+            nn.Linear(nf * 4, nf * 8),
+            nn.ReLU(),
+            nn.Linear(nf * 8, nf * 16),
+            nn.ReLU(),
+            nn.Linear(nf * 16, nf * 8),
+            nn.ReLU(),
+            nn.Linear(nf * 8, z_dim),
+        ])
+
+    def forward(self, x):
+        x = x.reshape([x.shape[0], -1])
+        for f in self.layers:
+            x = f(x)
+        return x

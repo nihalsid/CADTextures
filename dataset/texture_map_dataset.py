@@ -27,17 +27,21 @@ class TextureMapDataset(Dataset):
         item_list = read_list(splits_file)
         # sanity filter
         self.items = [x for x in item_list if (self.path_to_dataset / x / 'surface_texture.png').exists()]
+        self.load_retrievals = 'retrievals' in config.inputs
+        if self.load_retrievals:
+            self.retrieval_dir = Path(config.dictionary.retrieval_dir)
         if self.preload:
             for index in tqdm(range(len(self.items)), desc='preload_texmap_data'):
                 if self.items[index] not in preload_dict:
                     df, texture, normal, noc, mask_texture = self.load_view_independent_data_from_disk(index)
-                    render_list, noc_render_list, mask_render_list, partial_texture_list = [], [], [], []
+                    render_list, noc_render_list, mask_render_list, partial_texture_list, retrievals_list = [], [], [], [], []
                     for view_index in range(self.views_per_shape):
-                        render, noc_render, mask_render, partial_texture = self.load_view_dependent_data_from_disk(index, view_index)
+                        render, noc_render, mask_render, partial_texture, retrievals = self.load_view_dependent_data_from_disk(index, view_index)
                         render_list.append(render)
                         noc_render_list.append(noc_render)
                         mask_render_list.append(mask_render)
                         partial_texture_list.append(partial_texture)
+                        retrievals_list.append(retrievals)
                     self.preload_dict[self.items[index]] = {
                         'df': df,
                         'texture': texture,
@@ -47,9 +51,10 @@ class TextureMapDataset(Dataset):
                         'mask_texture': mask_texture,
                         'render': render_list,
                         'mask_render': mask_render_list,
-                        'partial_texture': partial_texture_list
+                        'partial_texture': partial_texture_list,
+                        'retrievals': retrievals_list
                     }
-        elif config.dictionary is not None:  # retrieval task
+        elif hasattr(config, 'dictionary') and config.dictionary is not None and not hasattr(config.dictionary, 'retrieval_dir'):  # retrieval task
             for index in tqdm(range(len(self.items)), desc=f'preload_texmaps_{split}'):
                 if self.items[index] not in self.preload_dict:
                     self.preload_dict[self.items[index]] = {
@@ -85,6 +90,9 @@ class TextureMapDataset(Dataset):
         noc_render_path = self.path_to_dataset / item / f"noc_render_{view_index:03d}.png"
         mask_path = self.path_to_dataset / item / f"silhoutte_{view_index:03d}.png"
         partial_texture_path = self.path_to_dataset / item / f"inv_partial_texture_{view_index:03d}.png"
+        retrieval = []
+        if self.load_retrievals:
+            retrieval = np.load(self.retrieval_dir / 'compose' / f'{item}__{view_index:02d}.npz')["arr_0"]
         with Image.open(image_path) as render_im:
             render = self.from_rgb(np.array(render_im)).astype(np.float32)
         with Image.open(noc_render_path) as render_noc:
@@ -98,25 +106,28 @@ class TextureMapDataset(Dataset):
         noc_render[~mask_render, :] = 0
         render = render[:, :, :3]
         noc_render = noc_render[:, :, :3]
-        return np.ascontiguousarray(np.transpose(render, (2, 0, 1))), np.ascontiguousarray(np.transpose(noc_render, (2, 0, 1))), mask_render[np.newaxis, :, :], np.ascontiguousarray(np.transpose(partial_texture, (2, 0, 1)))
+        return np.ascontiguousarray(np.transpose(render, (2, 0, 1))), np.ascontiguousarray(np.transpose(noc_render, (2, 0, 1))), mask_render[np.newaxis, :, :], np.ascontiguousarray(np.transpose(partial_texture, (2, 0, 1))), retrieval
 
     def __getitem__(self, index):
         item, view_index = self.get_item_and_view_idx(index)
         if self.preload:
             df, texture, normal, noc, mask_texture = self.preload_dict[item]['df'], self.preload_dict[item]['texture'], self.preload_dict[item]['normal'], self.preload_dict[item]['noc'], self.preload_dict[item]['mask_texture']
-            render_list, noc_render_list, mask_render_list, partial_texture_list = self.preload_dict[item]['render'], self.preload_dict[item]['noc_render'], self.preload_dict[item]['mask_render'], self.preload_dict[item]['partial_texture']
+            render_list, noc_render_list, mask_render_list, partial_texture_list, retrieval_list = \
+                self.preload_dict[item]['render'], self.preload_dict[item]['noc_render'], self.preload_dict[item]['mask_render'], self.preload_dict[item]['partial_texture'], self.preload_dict[item]['retrievals']
             render = render_list[view_index]
             noc_render = noc_render_list[view_index]
             mask_render = mask_render_list[view_index]
             partial_texture = partial_texture_list[view_index]
+            retrievals = retrieval_list[view_index]
         else:
             df, texture, normal, noc, mask_texture = self.load_view_independent_data_from_disk(index)
-            render, noc_render, mask_render, partial_texture = self.load_view_dependent_data_from_disk(index)
+            render, noc_render, mask_render, partial_texture, retrievals = self.load_view_dependent_data_from_disk(index)
 
         return {
             'name': f'{item}',
             'view_index': view_index,
             'df': df,
+            'retrievals': retrievals,
             'texture': texture,
             'normal': normal,
             'noc': noc,
@@ -135,10 +146,13 @@ class TextureMapDataset(Dataset):
         items_non_color = ['normal', 'noc', 'noc_render']
         apply_batch_color_transform_and_normalization(batch, items_color, items_non_color, self.color_space)
         batch['texture'] = self.apply_mask_texture(batch['texture'], batch['mask_texture'])
+        # rand_index = random.randint(0, 7)
+        # batch['retrievals'][:, rand_index, :, :, :] = batch['texture']
 
     @staticmethod
     def apply_mask_texture(texture, mask):
-        return texture * mask.expand(-1, texture.shape[1], -1, -1)
+        expanded_mask = mask.expand(-1, texture.shape[1], -1, -1)
+        return texture * expanded_mask
 
     def convert_data_for_visualization(self, colored_items, non_colored_items, masks):
         for i in range(len(colored_items)):
@@ -167,6 +181,8 @@ class TextureMapDataset(Dataset):
         keys = ['texture', 'normal', 'noc', 'noc_render', 'mask_texture', 'render', 'mask_render', 'partial_texture']
         if type(batch['df']) != list:
             keys.append('df')
+        if type(batch['retrievals']) != list:
+            keys.append('retrievals')
         move_batch_to_gpu(batch, device, keys)
 
     def visualize_sample_pyplot(self, texture, normal, noc, mask_texture, render, noc_render, mask_render, partial_texture):

@@ -1,11 +1,14 @@
 import torch
 import numpy as np
+from scipy.linalg import block_diag
+
 
 class NTXentLoss(torch.nn.Module):
 
-    def __init__(self, temperature, use_cosine_similarity):
+    def __init__(self, temperature, num_patch_x, use_cosine_similarity):
         super(NTXentLoss, self).__init__()
         self.temperature = temperature
+        self.num_patch_x = num_patch_x
         self.softmax = torch.nn.Softmax(dim=-1)
         self.sigmoid = torch.nn.Sigmoid()
         self.similarity_function = self._get_similarity_function(use_cosine_similarity)
@@ -19,11 +22,8 @@ class NTXentLoss(torch.nn.Module):
             return self._dot_simililarity
 
     @staticmethod
-    def _get_correlated_mask(batch_size):
-        diag = np.eye(2 * batch_size)
-        l1 = np.eye((2 * batch_size), 2 * batch_size, k=-batch_size)
-        l2 = np.eye((2 * batch_size), 2 * batch_size, k=batch_size)
-        mask = torch.from_numpy((diag + l1 + l2))
+    def _get_correlated_mask(num_patch_x, batch_size):
+        mask = torch.from_numpy(block_diag(*[np.ones((num_patch_x * num_patch_x, num_patch_x * num_patch_x)) for i in range(batch_size // (num_patch_x * num_patch_x))]))
         mask = (1 - mask).type(torch.bool)
         return mask
 
@@ -44,16 +44,13 @@ class NTXentLoss(torch.nn.Module):
 
     def forward(self, zis, zjs):
         batch_size = zis.shape[0]
-        representations = torch.cat([zjs, zis], dim=0)
-        similarity_matrix = self.similarity_function(representations, representations)
+        similarity_matrix = self.similarity_function(zis, zjs)
         # filter out the scores from the positive samples
-        l_pos = torch.diag(similarity_matrix, batch_size)
-        r_pos = torch.diag(similarity_matrix, -batch_size)
-        positives = torch.cat([l_pos, r_pos]).view(2 * batch_size, 1)
-        batch_mask = self._get_correlated_mask(batch_size).type(torch.bool)
-        negatives = similarity_matrix[batch_mask.cuda(zis.device)].view(2 * batch_size, -1)
+        positives = torch.diag(similarity_matrix).view(batch_size, 1)
+        batch_mask = self._get_correlated_mask(self.num_patch_x, batch_size).type(torch.bool)
+        negatives = similarity_matrix[batch_mask.cuda(zis.device)].view(batch_size, -1)
         logits = torch.cat((positives, negatives), dim=1)
         logits /= self.temperature
-        labels = torch.zeros(2 * batch_size).to(zis.device).long()
+        labels = torch.zeros(batch_size).to(zis.device).long()
         loss = self.criterion(logits, labels)
-        return loss / (2 * batch_size)
+        return loss / batch_size
