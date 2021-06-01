@@ -217,4 +217,4 @@ class RefinementAttentionTextureGAN(nn.Module):
 
 
 def get_model(config):
-    return RefinementAttentionTextureGAN(4, 3, config.model.input_texture_ngf, config.dictionary.K, 128 // config.dictionary.patch_size)
+    return RefinementAttentionTextureGAN(4, 3, config.model.input_texture_ngf, config.dictionary.K + 2, 128 // config.dictionary.patch_size)

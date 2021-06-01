@@ -12,7 +12,7 @@ from util.timer import Timer
 def test_texture_map_dataset(config, visualize):
     dataset = TextureMapDataset(config, 'train', {})
     print("Length of dataset:", len(dataset))
-    dataloader = DataLoader(dataset, batch_size=4, shuffle=False, num_workers=4, pin_memory=True)
+    dataloader = DataLoader(dataset, batch_size=4, shuffle=False, num_workers=config.num_workers, pin_memory=True)
     with Timer('Dataloader'):
         for batch_idx, batch in enumerate(tqdm(dataloader)):
             dataset.apply_batch_transforms(batch)
@@ -21,8 +21,10 @@ def test_texture_map_dataset(config, visualize):
         for batch_idx, batch in enumerate(tqdm(dataloader)):
             dataset.apply_batch_transforms(batch)
             for ii in range(batch['texture'].shape[0]):
+                sampled_patches = dataset.sample_patches_for_ptexture(f"{batch['name'][ii]}__{batch['view_index'][ii]:02d}", 16, 4)
                 dataset.visualize_sample_pyplot(batch['texture'][ii].numpy(), batch['normal'][ii].numpy(), batch['noc'][ii].numpy(),
-                                                batch['mask_texture'][ii].numpy(), batch['render'][ii].numpy(), batch['noc_render'][ii].numpy(), batch['mask_render'][ii].numpy(), batch['partial_texture'][ii].numpy())
+                                                batch['mask_texture'][ii].numpy(), batch['render'][ii].numpy(), batch['noc_render'][ii].numpy(),
+                                                batch['mask_render'][ii].numpy(), batch['partial_texture'][ii].numpy(), sampled_patches.numpy())
 
 
 def test_texture_completion_dataset(config, visualize):

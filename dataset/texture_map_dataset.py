@@ -5,7 +5,9 @@ from PIL import Image
 from torch.utils.data.dataset import Dataset
 from tqdm import tqdm
 from pathlib import Path
-from util.misc import read_list, move_batch_to_gpu, apply_batch_color_transform_and_normalization
+
+from model.attention import Fold2D
+from util.misc import read_list, move_batch_to_gpu, apply_batch_color_transform_and_normalization, normalize_tensor_color
 import numpy as np
 from colorspacious import cspace_convert
 
@@ -185,12 +187,13 @@ class TextureMapDataset(Dataset):
             keys.append('retrievals')
         move_batch_to_gpu(batch, device, keys)
 
-    def visualize_sample_pyplot(self, texture, normal, noc, mask_texture, render, noc_render, mask_render, partial_texture):
+    def visualize_sample_pyplot(self, texture, normal, noc, mask_texture, render, noc_render, mask_render, partial_texture, sampled_patches):
         import matplotlib.pyplot as plt
         [texture, render, partial_texture], [normal, noc, noc_render], [mask_texture, mask_render] = self.convert_data_for_visualization([texture, render, partial_texture], [normal, noc, noc_render], [mask_texture, mask_render])
-        rows, cols = 2, 4
-        f, axarr = plt.subplots(2, 4, figsize=(16, 4))
-        items = [[texture, normal, render, noc_render], [noc, mask_texture, mask_render, partial_texture]]
+        sampled_patches, _, _ = self.convert_data_for_visualization([sampled_patches[i] for i in range(sampled_patches.shape[0])], [], [])
+        rows, cols = 3, 4
+        f, axarr = plt.subplots(3, 4, figsize=(24, 4))
+        items = [[texture, normal, render, noc_render], [noc, mask_texture, mask_render, partial_texture], sampled_patches[:4]]
         for i in range(rows):
             for j in range(cols):
                 axarr[i, j].imshow(items[i][j])
@@ -250,6 +253,21 @@ class TextureMapDataset(Dataset):
                     sampled_generated = tensors[tid][b: b + 1, :, samples[0][k]: samples[0][k] + patch_size, samples[1][k]: samples[1][k] + patch_size]
                     all_samples[tid].append(sampled_generated)
         return [torch.cat(all_samples[tid], dim=0) for tid in range(len(tensors))]
+
+    def sample_patches_for_ptexture(self, partial_texture_name, patch_size, num_textures):
+        fold2d = Fold2D(self.texture_map_size // patch_size, patch_size, 3)
+        texture = partial_texture_name.split("__")[0]
+        view_idx = int(partial_texture_name.split("__")[1])
+        partial_texture = torch.from_numpy(self.get_partial_texture(texture, view_idx)).unsqueeze(0)
+        partial_texture = normalize_tensor_color(partial_texture, self.color_space)
+        with Image.open(self.path_to_dataset / texture / f"inv_partial_mask_{view_idx:03d}.png") as mask_im:
+            mask_im.thumbnail((self.texture_map_size, self.texture_map_size))
+            partial_mask = torch.from_numpy(np.array(mask_im)[:, :, 0] > 0).unsqueeze(0).unsqueeze(0)
+        num_patches = (self.texture_map_size // patch_size) ** 2
+        all_samples = []
+        for i in range(num_textures):
+            all_samples.append(fold2d(TextureMapDataset.sample_patches(partial_mask, patch_size, num_patches, partial_texture)[0]))
+        return torch.cat(all_samples, dim=0)
 
     def get_item_and_view_idx(self, index):
         if self.all_view_indexing_mode:

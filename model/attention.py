@@ -67,8 +67,8 @@ class AttentionBlock(nn.Module):
         self.g = Conv2dAttentionOutput(num_output_channels, self.cf_op) if not no_output_mapping else nn.Identity()
         self.o = Conv2dAttentionOutput(self.cf_op, num_output_channels) if not no_output_mapping else nn.Identity()
         self.max = nn.MaxPool1d(kernel_size=K)
-        self.init_scale = 63
-        self.init_shift = -45
+        self.init_scale = 40
+        self.init_shift = -20
         self.sig_scale = nn.Parameter(torch.ones(1) * self.init_scale)
         self.sig_shift = nn.Parameter(torch.ones(1) * self.init_shift)
         self.sigmoid = nn.Sigmoid()

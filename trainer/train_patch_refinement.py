@@ -224,15 +224,15 @@ class TextureMapRefinementModule(pl.LightningModule):
         plt.savefig(save_dir / "figures" / f"{name}_{v_idx}.jpg", bbox_inches='tight', dpi=360)
         plt.close()
 
-        f, axarr = plt.subplots(3, self.K + 1, figsize=((self.K + 1) * 4, 8))
-        retrievals_vis, _, _ = self.train_dataset.convert_data_for_visualization([retrievals[i] for i in range(self.K)], [], [])
+        f, axarr = plt.subplots(3, self.K + 2 + 1, figsize=((self.K + 1) * 4, 8))
+        retrievals_vis, _, _ = self.train_dataset.convert_data_for_visualization([retrievals[i] for i in range(self.K + 2)], [], [])
         axarr[0, 0].imshow(texture)
         axarr[0, 0].axis('off')
         axarr[1, 0].imshow(prediction)
         axarr[1, 0].axis('off')
         axarr[2, 0].imshow(np.zeros_like(prediction))
         axarr[2, 0].axis('off')
-        for i in range(self.K):
+        for i in range(self.K + 2):
             axarr[0, 1 + i].imshow(retrievals_vis[i])
             axarr[0, 1 + i].axis('off')
             axarr[1, 1 + i].imshow(attention_maps[i], cmap='RdYlGn')

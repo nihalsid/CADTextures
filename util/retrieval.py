@@ -150,7 +150,8 @@ def query_dictionary_using_features(dictionary_config, patch_names, input_featur
 def create_retrieval_from_mapping(texture_view_id, retrieval_mappings, K, dataset_train, dataset, dictionary_config, tree_path):
     num_patch_x = dataset.texture_map_size // dictionary_config.patch_size
     dataset_index = json.loads((tree_path / "index.json").read_text())
-    texture_retrieval = torch.from_numpy(np.zeros((K, 3, dataset.texture_map_size, dataset.texture_map_size), dtype=np.float32))
+    num_input_patch_textures = 2
+    texture_retrieval = torch.from_numpy(np.zeros((K + num_input_patch_textures, 3, dataset.texture_map_size, dataset.texture_map_size), dtype=np.float32))
     distances = torch.ones([K, dataset.texture_map_size, dataset.texture_map_size]) * 100
     all_patches_for_texture = []
     for p_y in range(num_patch_x):
@@ -172,6 +173,7 @@ def create_retrieval_from_mapping(texture_view_id, retrieval_mappings, K, datase
                 shape = normalize_tensor_color(shape.unsqueeze(0), dataset.color_space).squeeze(0)
                 texture_retrieval[k, :, yy0: yy1, xx0: xx1] = shape[:, Y0:Y1, X0:X1]
                 distances[k, yy0: yy1, xx0: xx1] = float(current_distance)
+    texture_retrieval[K:, :, :, :] = dataset.sample_patches_for_ptexture(texture_view_id, dictionary_config.patch_size, num_input_patch_textures)
     return texture_retrieval
 
 
@@ -291,8 +293,8 @@ def retrievals_to_disk(mode, config, use_target_for_feats, num_proc=1, proc=0):
         for idx, texture in tqdm(enumerate(texture_views), desc='visualize'):
             mask = dataset_vis.get_mask(texture.split('__')[0])
             retrieval = np.load(retrievals_dir / 'compose' / f'{texture}.npz')["arr_0"]
-            vis_image = np.ones((128, (config.dictionary.K + 2) * 128 + (config.dictionary.K + 1) * 20, 3), dtype=np.uint8) * 255
-            for k in range(config.dictionary.K):
+            vis_image = np.ones((128, (config.dictionary.K + 2 + 2) * 128 + (config.dictionary.K + 2 + 1) * 20, 3), dtype=np.uint8) * 255
+            for k in range(config.dictionary.K + 2):
                 retrieved_texture = dataset_vis.convert_data_for_visualization([retrieval[k]], [], [])[0][0]
                 vis_image[:, (k + 2) * 148: (k + 2) * 148 + 128, :] = (retrieved_texture * mask.transpose((1, 2, 0)) * 255).astype(np.uint8)
             item, view_idx = texture.split('__')[0], int(texture.split('__')[1])

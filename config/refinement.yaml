@@ -29,9 +29,9 @@ lambda_regr_retr: 5
 regression_loss_type: l2
 temperature: 0.1
 phase_change_epochs:
-  - 150
-  - 150
-  - 150
+  - 50
+  - 30
+  - 25
 current_phase: 0
 
 dictionary:
