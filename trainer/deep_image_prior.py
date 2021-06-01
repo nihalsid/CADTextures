@@ -1,9 +1,21 @@
+import matplotlib.pyplot as plt
 import torch
+import numpy as np
 from omegaconf.dictconfig import DictConfig
 
 from dataset.texture_map_dataset import TextureMapDataset
-from model.texture_gan import TextureGAN, get_model
+from model.texture_gan import TextureGAN
 from util.regression_loss import RegressionLossHelper
+
+
+def torch_to_np(img_torch):
+    '''Converts an image in torch.Tensor format to np.array.
+    From 1 x C x W x H [0..1] to  W x H x C [0..1]
+    '''
+    img_np = img_torch.detach().cpu().numpy()[0]
+    img_np = np.moveaxis(img_np, 0, 2)
+    return img_np
+
 
 config = {
     'model': {
@@ -58,20 +70,64 @@ train_dataloader = torch.utils.data.DataLoader(train_dataset,
                                                num_workers=0,
                                                pin_memory=True,
                                                drop_last=False)
-sample = next(iter(train_dataloader))
-train_dataset.apply_batch_transforms(sample)
 model = TextureGAN(3, 3, config.model.input_texture_ngf)
 optimizer = torch.optim.Adam(model.parameters(),
                              lr=config.lr,
                              betas=(0.5, 0.999))
 regression_loss = RegressionLossHelper(config.regression_loss_type)
 
-iterations = 10
-for i in range(iterations):
+sample = next(iter(train_dataloader))
+train_dataset.apply_batch_transforms(sample)
+
+print(
+    f'sample["partial_texture"] in [{sample["partial_texture"].min():.3f}, {sample["partial_texture"].max()}:.3f]'
+)
+print(
+    f'sample["texture"] in [{sample["texture"].min():.3f}, {sample["texture"].max():.3f}]'
+)
+
+# Main optimization loop
+iterations = 1000
+plot_interval = 10
+for i in range(1, iterations):
     optimizer.zero_grad()
     pred = model(sample["partial_texture"])
-    loss_regression = regression_loss.calculate_loss(sample["texture"],
-                                                     pred).mean()
+    mask = sample["mask_texture"]
+    loss_regression = regression_loss.calculate_loss(sample["texture"] * mask,
+                                                     pred * mask).mean()
     loss_regression.backward()
-    print(loss_regression)
     optimizer.step()
+
+    # visualization
+    with torch.no_grad():
+        if i % plot_interval == 0:
+            print(
+                f'loss_regression={loss_regression:.6f}, pred in [{pred.min():.3f}, {pred.max():.3f}]'
+            )
+
+            plt.subplot(131)
+            input = torch_to_np(sample["partial_texture"].clone())
+            input = train_dataset.get_colored_data_for_visualization(input)
+            plt.imshow(input)
+            plt.axis("off")
+            plt.title("input")
+            plt.draw()
+
+            plt.subplot(132)
+            gt = torch_to_np(sample["texture"].clone())
+            gt = train_dataset.get_colored_data_for_visualization(gt)
+            plt.imshow(gt)
+            plt.axis("off")
+            plt.title("gt")
+            plt.draw()
+
+            plt.subplot(133)
+            pred = torch_to_np(pred)
+            pred = train_dataset.get_colored_data_for_visualization(pred)
+            plt.imshow(pred)
+            plt.axis("off")
+            plt.title("prediction")
+            plt.draw()
+
+            plt.pause(1e-2)
+            # plt.show()
