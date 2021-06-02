@@ -14,4 +14,4 @@
 
 cd /rhome/ysiddiqui/CADTextures/
 
-python trainer/train_end2end_retrieval_fuse.py sanity_steps=1 dataset=single_cube_textures dataset.preload=True experiment=$REXPERIMENT wandb_main=True val_check_interval=$RVALCHECK save_epoch=$RVALCHECK
+python trainer/train_end2end_retrieval_fuse.py sanity_steps=1 dataset=single_cube_textures dataset.preload=True experiment=$REXPERIMENT wandb_main=True val_check_interval=$RVALCHECK save_epoch=$RVALCHECK warmup_epochs_constrastive=$RWARMUP

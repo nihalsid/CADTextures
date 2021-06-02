@@ -29,6 +29,9 @@ batch_size: 8
 num_workers: 8
 lr: 0.0001
 
+warmup_epochs_constrastive: 30
+temperature: 0.1
+
 fenc_nf: 32
 fenc_zdim: 128
 
