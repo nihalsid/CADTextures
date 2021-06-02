@@ -21,15 +21,14 @@ def create_dictionary(feature_extractor, dictionary_config, latent_dim, dataset,
     tree_path.mkdir(exist_ok=True, parents=True)
     num_patch_x = dataset.texture_map_size // dictionary_config.patch_size
     number_of_patches = len(dataset) * num_patch_x ** 2
-
     database = np.zeros((number_of_patches, 1 + 2 * 2 + latent_dim), dtype=np.float32)
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=dictionary_config.batch_size, shuffle=False, num_workers=dictionary_config.num_workers, drop_last=False)
     with torch.no_grad():
         db_idx = 0
         for i, item in enumerate(tqdm(dataloader, desc='dict_feats')):
-            dataset.apply_batch_transforms(item)
-            target_patches = item['texture'].cuda()
-            prediction = feature_extractor(target_patches[:, 0:1, :, :])
+            dataset.apply_batch_transforms(item, texture_masking=False)
+            target_patches = dataset.unfold(item['texture'].cuda())
+            prediction = feature_extractor(target_patches)
             prediction = torch.nn.functional.normalize(prediction, dim=1).cpu().numpy()
             for batch_idx in range(item['texture'].shape[0]):
                 for p_y in range(num_patch_x):
@@ -62,7 +61,7 @@ def extract_features(feature_extractor, dictionary_config, latent_dim, dataset, 
         for i, item in enumerate(tqdm(dataloader, desc='query_features')):
             dataset.apply_batch_transforms(item)
             item[key] = item[key].cuda()
-            prediction = torch.nn.functional.normalize(feature_extractor(item[key][:, 0:1, :, :]), dim=1).cpu().numpy()
+            prediction = torch.nn.functional.normalize(feature_extractor(item[key]), dim=1).cpu().numpy()
             features[(i * dictionary_config.batch_size) * num_patch_x ** 2: (i * dictionary_config.batch_size + item[key].shape[0]) * num_patch_x ** 2, :] = prediction
             for batch_idx in range(item[key].shape[0]):
                 for p_y in range(num_patch_x):

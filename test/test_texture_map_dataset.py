@@ -4,6 +4,7 @@ from tqdm import tqdm
 import hydra
 
 from dataset.texture_completion_dataset import TextureCompletionDataset
+from dataset.texture_end2end_dataset import TextureEnd2EndDataset
 from dataset.texture_map_dataset import TextureMapDataset
 from dataset.texture_patch_dataset import TexturePatchDataset
 from util.timer import Timer
@@ -54,6 +55,19 @@ def test_texture_patch_dataset(config, visualize):
                 dataset.visualize_sample_pyplot(batch['input'][ii].numpy(), batch['target'][ii].numpy(), batch['mask_texture'][ii].numpy(), batch['mask_missing'][ii].numpy(), batch['input_patch'][ii].numpy(), generated[ii].numpy())
 
 
+def test_texture_end2end_dataset(config, visualize):
+    dataset = TextureEnd2EndDataset(config, 'train', {})
+    dataloader = DataLoader(dataset, batch_size=2, shuffle=False, num_workers=0, pin_memory=True)
+    for batch_idx, batch in enumerate(tqdm(dataloader)):
+        dataset.apply_batch_transforms(batch)
+        TextureEnd2EndDataset.move_batch_to_gpu(batch, torch.device('cuda'))
+    if visualize:
+        for batch_idx, batch in enumerate(tqdm(dataloader)):
+            dataset.apply_batch_transforms(batch)
+            for ii in range(batch['texture'].shape[0]):
+                dataset.visualize_sample_pyplot(batch['partial_texture'][ii].numpy(), batch['texture'][ii].numpy(), batch['mask_texture'][ii].numpy(), batch['database_textures'].numpy())
+
+
 @hydra.main(config_path='../config', config_name='refinement')
 def main_test_texture_map_ds(config):
     test_texture_map_dataset(config, True)
@@ -69,5 +83,10 @@ def main_test_texture_patch_ds(config):
     test_texture_patch_dataset(config, True)
 
 
+@hydra.main(config_path='../config', config_name='texture_end2end')
+def main_test_texture_end2end_ds(config):
+    test_texture_end2end_dataset(config, True)
+
+
 if __name__ == '__main__':
-    main_test_texture_map_ds()
+    main_test_texture_end2end_ds()
