@@ -3,7 +3,7 @@ import torch
 from model.attention import AttentionFeatureEncoder, AttentionBlock, PatchedAttentionBlock
 from model.discriminator import TextureGANDiscriminator
 from model.refinement import MainModelInput, MainModelRetrieval, RefinementAttentionTextureGAN
-from model.retrieval import Patch16, Patch16Thin, Patch16MLP
+from model.retrieval import Patch16, Patch16Thin, Patch16MLP, FullTexture
 from model.texture_gan import ResidualBlock, Scribbler, ImageFusionScribblerSlim, ImageAnd3dFusionScribbler, ScribblerGenerator, ScribblerSlim, TextureGAN, TextureGANSlim
 from util.misc import print_model_parameter_count
 
@@ -155,5 +155,12 @@ def test_patch16_mlp():
     print_model_parameter_count(model)
 
 
+def test_full_texture():
+    model = FullTexture(32, 64)
+    t0 = torch.randn(2, 3, 128, 128)
+    print(model(t0).shape)
+    print_model_parameter_count(model)
+
+
 if __name__ == "__main__":
-    test_patch16_mlp()
+    test_full_texture()

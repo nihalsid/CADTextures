@@ -93,7 +93,7 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         if self.preload:
             texture, mask_texture, partial_texture = self.preload_dict[item]['texture'], self.preload_dict[item]['mask_texture'], self.preload_dict[item]['partial_texture'][view_index]
             if self.load_database:
-                database_texture_names = self.items[:self.num_database_textures] # random.sample(self.items, self.num_database_textures)
+                database_texture_names = random.sample(self.items, self.num_database_textures)
                 for tex in database_texture_names:
                     database_textures.append(self.preload_dict[tex]['texture'][np.newaxis, :, :, :])
                 database_textures = np.concatenate(database_textures, axis=0)

@@ -51,6 +51,28 @@ class Patch16(nn.Module):
         return self.final_layer(unfolded)
 
 
+class FullTexture(nn.Module):
+
+    def __init__(self, nf, z_dim):
+        super().__init__()
+        # noinspection PyTypeChecker
+        self.backbone = nn.Sequential(
+            Double3x3Conv2d(3, nf),
+            Double3x3Conv2d(nf, nf * 2),
+            Double3x3Conv2d(nf * 2, nf * 4),
+            Double3x3Conv2d(nf * 4, nf * 8),
+            nn.Conv2d(nf * 8, nf * 8, kernel_size=3, stride=2, padding=1),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(nf * 8, nf * 8, kernel_size=3, stride=2, padding=1),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
+        self.final_layer = nn.Linear(8 * nf * 2 * 2, z_dim)
+
+    def forward(self, x):
+        volume = self.backbone(x)
+        return self.final_layer(volume.view(volume.shape[0], -1))
+
+
 class Patch16Thin(nn.Module):
 
     def __init__(self, nf, z_dim):
@@ -92,3 +114,19 @@ class Patch16MLP(nn.Module):
         for f in self.layers:
             x = f(x)
         return x
+
+
+def get_input_feature_extractor(config):
+    if config.dictionary.patch_size == 16:
+        return Patch16(config.fenc_nf, config.fenc_zdim)
+    elif config.dictionary.patch_size == 128:
+        return FullTexture(config.fenc_nf, config.fenc_zdim)
+    raise NotImplementedError
+
+
+def get_target_feature_extractor(config):
+    if config.dictionary.patch_size == 16:
+        return Patch16MLP(config.fenc_nf, config.fenc_zdim)
+    elif config.dictionary.patch_size == 128:
+        return FullTexture(config.fenc_nf, config.fenc_zdim)
+    raise NotImplementedError

@@ -8,7 +8,7 @@ from pathlib import Path
 from dataset.texture_end2end_dataset import TextureEnd2EndDataset
 from dataset.texture_map_dataset import TextureMapDataset
 from model.attention import Fold2D
-from model.retrieval import Patch16, Patch16MLP
+from model.retrieval import Patch16, Patch16MLP, get_target_feature_extractor, get_input_feature_extractor
 from util.contrastive_loss import NTXentLoss
 
 
@@ -19,17 +19,18 @@ class TextureEnd2EndModule(pl.LightningModule):
         self.save_hyperparameters(config)
         self.preload_dict = {}
         assert config.dataset.texture_map_size == 128, "only 128x128 texture map supported"
-        self.fenc_input, self.fenc_target = Patch16(config.fenc_nf, config.fenc_zdim), Patch16MLP(config.fenc_nf, config.fenc_zdim)
+        self.fenc_input, self.fenc_target = get_input_feature_extractor(config), get_target_feature_extractor(config)
         self.current_learning_rate = config.lr
         self.nt_xent_loss = NTXentLoss(float(config.temperature), config.dataset.texture_map_size // config.dictionary.patch_size, True)
         self.mse_loss = torch.nn.MSELoss(reduction='mean')
-        self.current_contrastive_weight = 1
+        self.start_contrastive_weight = 1
+        self.current_contrastive_weight = self.start_contrastive_weight
         self.dataset = lambda split: TextureEnd2EndDataset(config, split, self.preload_dict)
         self.train_dataset = self.dataset('train')
         self.fold = Fold2D(config.dataset.texture_map_size // config.dictionary.patch_size, config.dictionary.patch_size, 3)
 
     def on_train_epoch_start(self):
-        self.current_contrastive_weight = max(0, self.hparams.warmup_epochs_constrastive - self.current_epoch) / self.hparams.warmup_epochs_constrastive
+        self.current_contrastive_weight = self.start_contrastive_weight * max(0, self.hparams.warmup_epochs_constrastive - self.current_epoch) / self.hparams.warmup_epochs_constrastive
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(list(self.fenc_input.parameters()) + list(self.fenc_target.parameters()), lr=self.hparams.lr)
@@ -68,7 +69,7 @@ class TextureEnd2EndModule(pl.LightningModule):
         if use_argmax:
             selected_patches = torch.einsum('ij,ijk->ik', torch.nn.functional.one_hot(similarity_scores.argmax(dim=1), num_classes=similarity_scores.shape[1]).float().to(self.device), candidates)
         else:
-            scaled_similarity_scores = similarity_scores * 10
+            scaled_similarity_scores = similarity_scores * 25
             selection_mask = torch.nn.functional.gumbel_softmax(scaled_similarity_scores, tau=1, hard=True)
             selected_patches = torch.einsum('ij,ijk->ik', selection_mask, candidates)
         selected_patches = selected_patches.view(similarity_scores.shape[0], batch['database_textures'].shape[1], batch['database_textures'].shape[2], batch['database_textures'].shape[3])
