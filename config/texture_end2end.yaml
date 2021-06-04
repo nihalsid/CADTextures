@@ -29,8 +29,14 @@ batch_size: 8
 num_workers: 8
 lr: 0.0001
 
-warmup_epochs_constrastive: 30
+warmup_epochs_constrastive: 120
 temperature: 0.1
+lambda_regr_l: 10
+lambda_regr_ab: 5
+lambda_content: 0.0075
+lambda_style: 0.00075
+lambda_ntxent: 1
+regression_loss_type: l2
 
 fenc_nf: 32
 fenc_zdim: 128

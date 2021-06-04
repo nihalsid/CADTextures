@@ -9,7 +9,10 @@ from dataset.texture_end2end_dataset import TextureEnd2EndDataset
 from dataset.texture_map_dataset import TextureMapDataset
 from model.attention import Fold2D
 from model.retrieval import Patch16, Patch16MLP, get_target_feature_extractor, get_input_feature_extractor
+from trainer.train_texture_map_predictor import TextureMapPredictorModule
 from util.contrastive_loss import NTXentLoss
+from util.feature_loss import FeatureLossHelper
+from util.regression_loss import RegressionLossHelper
 
 
 class TextureEnd2EndModule(pl.LightningModule):
@@ -22,6 +25,8 @@ class TextureEnd2EndModule(pl.LightningModule):
         self.fenc_input, self.fenc_target = get_input_feature_extractor(config), get_target_feature_extractor(config)
         self.current_learning_rate = config.lr
         self.nt_xent_loss = NTXentLoss(float(config.temperature), config.dataset.texture_map_size // config.dictionary.patch_size, True)
+        self.regression_loss = RegressionLossHelper(self.hparams.regression_loss_type)
+        self.feature_loss_helper = FeatureLossHelper(['relu4_2'], ['relu3_2', 'relu4_2'])
         self.mse_loss = torch.nn.MSELoss(reduction='mean')
         self.start_contrastive_weight = 0.01
         self.current_contrastive_weight = self.start_contrastive_weight
@@ -78,10 +83,22 @@ class TextureEnd2EndModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         retrieved_texture, features_in, features_tgt = self.step(batch)
-        loss_regression = self.mse_loss(retrieved_texture, batch['texture'])
+        gt_texture_l, gt_texture_ab = TextureMapPredictorModule.split_into_channels(batch['texture'])
+        retrieved_texture_l, retrieved_texture_ab = TextureMapPredictorModule.split_into_channels(retrieved_texture)
+        loss_regression_l = self.regression_loss.calculate_loss(gt_texture_l, retrieved_texture_l).mean()
+        loss_regression_ab = self.regression_loss.calculate_loss(gt_texture_ab, retrieved_texture_ab).mean()
+        loss_content = self.feature_loss_helper.calculate_feature_loss(gt_texture_l, retrieved_texture_l).mean()
+        style_loss_maps = self.feature_loss_helper.calculate_style_loss(gt_texture_l, retrieved_texture_l)
+        loss_style = style_loss_maps[0].mean() + style_loss_maps[1].mean()
         loss_ntxent = self.nt_xent_loss(features_in, features_tgt)
-        loss_total = loss_ntxent * self.current_contrastive_weight + loss_regression
+        self.log("train/loss_regression_l", loss_regression_l, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        self.log("train/loss_regression_ab", loss_regression_ab, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        self.log("train/loss_content", loss_content, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        self.log("train/loss_style", loss_style, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        loss_total = loss_regression_l * self.hparams.lambda_regr_l + loss_regression_ab * self.hparams.lambda_regr_ab + loss_content * self.hparams.lambda_content + loss_style * self.hparams.lambda_style \
+                     + loss_ntxent * self.current_contrastive_weight
         self.log("learning_rate", self.current_learning_rate, on_step=True, on_epoch=False, prog_bar=False, logger=True)
+        loss_regression = self.mse_loss(retrieved_texture.detach(), batch['texture'])
         self.log("train/loss_regression", loss_regression, on_step=True, on_epoch=True, prog_bar=False, logger=True)
         self.log("train/loss_contrastive", loss_ntxent, on_step=True, on_epoch=True, prog_bar=False, logger=True)
         self.log("train/contrastive_weight", self.current_contrastive_weight, on_step=False, on_epoch=True, prog_bar=False, logger=True)
@@ -126,6 +143,9 @@ class TextureEnd2EndModule(pl.LightningModule):
         with torch.no_grad():
             retrieved_texture, _, _ = self.step(batch, use_argmax=True)
         ds_train.visualize_texture_batch(torch.cat([batch['texture'], retrieved_texture]).cpu().numpy(), output_dir / "train_batch.jpg")
+
+    def on_post_move_to_device(self):
+        self.feature_loss_helper.move_to_device(self.device)
 
 
 @hydra.main(config_path='../config', config_name='texture_end2end')
