@@ -13,9 +13,8 @@ from util.misc import read_list, move_batch_to_gpu, apply_batch_color_transform_
 
 class TextureEnd2EndDataset(torch.utils.data.Dataset):
 
-    def __init__(self, config, split, preload_dict, single_view=False, load_database=True):
+    def __init__(self, config, split, preload_dict, single_view=False):
         super().__init__()
-        self.load_database = load_database
         self.preload = config.dataset.preload
         self.preload_dict = preload_dict
         self.views_per_shape = 1 if (split == 'val' or split == 'val_vis' or split == 'train_vis' or single_view) else config.dataset.views_per_shape
@@ -24,7 +23,6 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         self.color_space = config.dataset.color_space
         self.from_rgb, self.to_rgb = TextureMapDataset.convert_cspace(config.dataset.color_space)
         self.path_to_dataset = Path(config.dataset.data_dir) / config.dataset.name
-        self.num_database_textures = config.dataset.num_database_textures
         splits_file = Path(config.dataset.data_dir) / 'splits' / config.dataset.name / config.dataset.splits_dir / f'{split}.txt'
         train_splits_file = Path(config.dataset.data_dir) / 'splits' / config.dataset.name / config.dataset.splits_dir / f'train.txt'
         item_list = read_list(splits_file)
@@ -66,10 +64,20 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
             partial_texture = self.from_rgb(TextureMapDataset.process_to_padded_thumbnail(partial_tex, self.texture_map_size)).astype(np.float32)
         return np.ascontiguousarray(np.transpose(partial_texture, (2, 0, 1)))
 
+    def add_database_to_batch(self, num_database_textures, batch, device, remove_true_textures):
+        assert self.preload
+        database_textures = []
+        candidate_names = [x for x in self.train_items if (x not in batch['name'] or not remove_true_textures)]
+        database_texture_names = random.sample(candidate_names, min(num_database_textures, len(candidate_names)))
+        for tex in database_texture_names:
+            database_textures.append(self.preload_dict[tex]['texture'][np.newaxis, :, :, :])
+        database_textures = torch.from_numpy(np.concatenate(database_textures, axis=0)).to(device)
+        batch['database_textures'] = database_textures
+
     def apply_batch_transforms(self, batch, texture_masking=True):
         normalization_keys = ['texture', 'partial_texture']
-        if not type(batch['database_textures']) == list:
-            batch['database_textures'] = self.unfold(batch['database_textures'].reshape([-1, batch['database_textures'].shape[2], batch['database_textures'].shape[3], batch['database_textures'].shape[4]]))
+        if 'database_textures' in batch:
+            batch['database_textures'] = self.unfold(batch['database_textures'])
             normalization_keys.append('database_textures')
         apply_batch_color_transform_and_normalization(batch, normalization_keys, [], self.color_space)
         if texture_masking:
@@ -79,7 +87,7 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
     @staticmethod
     def move_batch_to_gpu(batch, device):
         move_keys = ['texture', 'partial_texture', 'mask_texture']
-        if not type(batch['database_textures']) == list:
+        if 'database_textures' in batch:
             move_keys.append('database_textures')
         move_batch_to_gpu(batch, device, move_keys)
 
@@ -89,27 +97,15 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         view_index = index % self.views_per_shape
         item = self.items[index // self.views_per_shape]
-        database_textures = []
         if self.preload:
             texture, mask_texture, partial_texture = self.preload_dict[item]['texture'], self.preload_dict[item]['mask_texture'], self.preload_dict[item]['partial_texture'][view_index]
-            if self.load_database:
-                database_texture_names = random.sample(self.items, self.num_database_textures)
-                for tex in database_texture_names:
-                    database_textures.append(self.preload_dict[tex]['texture'][np.newaxis, :, :, :])
-                database_textures = np.concatenate(database_textures, axis=0)
         else:
             texture, mask_texture = self.load_view_independent_data_from_disk(item)
             partial_texture = self.load_view_dependent_data_from_disk(item, view_index)
-            if self.load_database:
-                database_texture_names = random.sample(self.items, self.num_database_textures)
-                for tex in database_texture_names:
-                    database_textures.append(self.load_view_independent_data_from_disk(tex)[0][np.newaxis, :, :, :])
-                database_textures = np.concatenate(database_textures, axis=0)
         return {
             'name': f'{item}',
             'view_index': view_index,
             'texture': texture,
-            'database_textures': database_textures,
             'mask_texture': mask_texture.astype(np.float32),
             'partial_texture': partial_texture
         }
@@ -152,10 +148,9 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.items) * self.views_per_shape
 
-    def get_all_texture_patch_codes(self, fenc_target, device, batch_size):
+    def get_all_texture_patch_codes(self, fenc_target, device, num_database_textures):
         assert self.preload
         codes = []
-        num_database_textures = self.num_database_textures * batch_size
         for i in range(math.ceil(len(self.train_items) / num_database_textures)):
             batch = dict({'database_textures': []})
             for tex in self.train_items[i * num_database_textures: (i + 1) * num_database_textures]:

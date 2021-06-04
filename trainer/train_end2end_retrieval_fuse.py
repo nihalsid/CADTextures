@@ -23,7 +23,7 @@ class TextureEnd2EndModule(pl.LightningModule):
         self.current_learning_rate = config.lr
         self.nt_xent_loss = NTXentLoss(float(config.temperature), config.dataset.texture_map_size // config.dictionary.patch_size, True)
         self.mse_loss = torch.nn.MSELoss(reduction='mean')
-        self.start_contrastive_weight = 1
+        self.start_contrastive_weight = 0.01
         self.current_contrastive_weight = self.start_contrastive_weight
         self.dataset = lambda split: TextureEnd2EndDataset(config, split, self.preload_dict)
         self.train_dataset = self.dataset('train')
@@ -58,6 +58,7 @@ class TextureEnd2EndModule(pl.LightningModule):
         return torch.utils.data.DataLoader(dataset, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, drop_last=False, pin_memory=True)
 
     def step(self, batch, use_argmax=False):
+        self.train_dataset.add_database_to_batch(self.hparams.batch_size * self.hparams.dataset.num_database_textures, batch, self.device, self.hparams.dictionary.patch_size == 128)
         self.train_dataset.apply_batch_transforms(batch)
         features_in = self.fenc_input(batch['partial_texture'])
         features_tgt_normed = torch.nn.functional.normalize(self.fenc_target(self.train_dataset.unfold(batch['texture'])), dim=1)
@@ -90,13 +91,13 @@ class TextureEnd2EndModule(pl.LightningModule):
         pass
 
     def validation_epoch_end(self, outputs):
-        dataset = lambda split, load_db: TextureEnd2EndDataset(self.hparams, split, self.preload_dict, single_view=True, load_database=load_db)
+        dataset = lambda split: TextureEnd2EndDataset(self.hparams, split, self.preload_dict, single_view=True)
         output_dir = Path("runs") / self.hparams.experiment / "visualization" / f"epoch_{self.current_epoch:04d}"
         output_dir.mkdir(exist_ok=True, parents=True)
-        ds_train = dataset('train', True)
+        ds_train = dataset('train')
 
         (output_dir / "val_vis").mkdir(exist_ok=True)
-        ds_vis = dataset('val_vis', False)
+        ds_vis = dataset('val_vis')
         loader = torch.utils.data.DataLoader(ds_vis, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, drop_last=False, pin_memory=True)
         total_loss_regression = 0
         total_loss_contrastive = 0
