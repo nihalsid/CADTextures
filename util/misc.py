@@ -51,6 +51,16 @@ def normalize_tensor_color(item, color_space):
     return item
 
 
+def normalize_npy(item, color_space):
+    if color_space == 'rgb':
+        item = item / 255 - 0.5
+    elif color_space == 'lab':
+        item[:, :, 0] = item[:, :, 0] / 100 - 0.5
+        item[:, :, 1] = item[:, :, 1] / 256
+        item[:, :, 2] = item[:, :, 2] / 256
+    return item
+
+
 def denormalize_and_rgb(arr, color_space, to_rgb_func, only_l):
     if color_space == 'rgb':
         arr = (arr + 0.5) * 255

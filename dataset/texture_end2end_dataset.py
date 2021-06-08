@@ -44,7 +44,7 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
                         'partial_texture': partial_texture_list,
                     }
         if config.dataset.splits_dir.startswith('overfit'):
-            multiplier = 240 if split == 'train' else 4
+            multiplier = 240 if split == 'train' else 1
             self.items = self.items * multiplier
             self.train_items = self.train_items * 240
 
@@ -110,16 +110,18 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
             'partial_texture': partial_texture
         }
 
-    def visualize_sample_pyplot(self, incomplete, target, mask, database):
+    def visualize_sample_pyplot(self, incomplete, target, mask, database, closest):
         import matplotlib.pyplot as plt
         incomplete = self.denormalize_and_rgb(np.transpose(incomplete, (1, 2, 0)))
         target = self.denormalize_and_rgb(np.transpose(target, (1, 2, 0)))
         mask = mask.squeeze()
+        if closest is None:
+            closest = np.zeros([8, 8])
         database = database.copy()
         database_patches = [self.denormalize_and_rgb(np.transpose(database[i, :, :, :], (1, 2, 0))) for i in range(database.shape[0])]
         sampled_patches = random.sample(range(len(database_patches)), 4 * 4)
         f, axarr = plt.subplots(5, 4, figsize=(16, 20))
-        items = [incomplete, mask, target, np.zeros([8, 8])]
+        items = [incomplete, mask, target, closest]
         for i in range(4):
             axarr[0, i].imshow(items[i])
             axarr[0, i].axis('off')
@@ -129,18 +131,22 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
                 axarr[i, j].axis('off')
         plt.tight_layout()
         plt.show()
+        plt.close()
 
-    def visualize_texture_batch(self, texture_batch, outpath):
+    def visualize_texture_batch(self, texture_batch, closest_batch, outpath):
         import matplotlib.pyplot as plt
         texture_batch = texture_batch.copy()
         texture_batch_items_row_0 = [self.denormalize_and_rgb(np.transpose(texture_batch[i, :, :, :], (1, 2, 0))) for i in range(texture_batch.shape[0] // 2)]
         texture_batch_items_row_1 = [self.denormalize_and_rgb(np.transpose(texture_batch[i, :, :, :], (1, 2, 0))) for i in range(texture_batch.shape[0]//2, texture_batch.shape[0])]
-        f, axarr = plt.subplots(2, len(texture_batch_items_row_0), figsize=(4 * len(texture_batch_items_row_0), 8))
+        f, axarr = plt.subplots(2 + (1 if closest_batch[0] is not None else 0), len(texture_batch_items_row_0), figsize=(4 * len(texture_batch_items_row_0), 8 + (4 if closest_batch[0] is not None else 0)))
         for i in range(len(texture_batch_items_row_0)):
             axarr[0, i].imshow(texture_batch_items_row_0[i])
             axarr[0, i].axis('off')
             axarr[1, i].imshow(texture_batch_items_row_1[i])
             axarr[1, i].axis('off')
+            if closest_batch[0] is not None:
+                axarr[2, i].imshow(closest_batch[i])
+                axarr[2, i].axis('off')
         plt.tight_layout()
         plt.savefig(outpath, bbox_inches='tight', dpi=240)
         plt.close()

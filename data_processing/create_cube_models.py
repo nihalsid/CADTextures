@@ -8,7 +8,9 @@ import numpy as np
 import random
 import json
 
-from util.misc import read_list, write_list
+from dataset.texture_map_dataset import TextureMapDataset
+from util.feature_loss import FeatureLossHelper
+from util.misc import read_list, write_list, normalize_npy
 
 
 def create_cube_models_from_base():
@@ -55,34 +57,46 @@ def create_cube_models_single_texture_from_base():
         Image.fromarray(image_array).save(output_folder / "texture.png")
 
 
-def find_closest_texture_in_train():
-    base_folder = "data/SingleShape-model/Cube/base"
-    target_folder = "data/SingleShape-model/Cube"
-    split_folder = "data/splits/SingleShape/Cube"
-    train = read_list(f"{base_folder}/256_train.txt")
-    val = read_list(f"{base_folder}/256_val.txt")
+def find_closest_texture_in_train(dataset):
+    import torch
+    to_torch_tensor = lambda x: torch.from_numpy(x).permute((2, 0, 1)).unsqueeze(0)
+    dataset_0, dataset_1 = dataset.split('/')
+    target_folder = f"data/{dataset_0}-model/{dataset_1}"
+    split_folder = f"data/splits/{dataset_0}/{dataset_1}"
+    train = read_list(f"{split_folder}/official/train.txt")
+    val = read_list(f"{split_folder}/official/val_vis.txt")
     im_k_dict = {}
 
-    for tex_k in train:
-        c_k = [int(y) for y in tex_k.split(',')]
-        im_k = np.array(Image.open(Path(target_folder) / f"{c_k[0]:03d}-{c_k[1]:03d}-{c_k[2]:03d}" / "texture.png")).astype(np.float32)
-        im_k_dict[f"{c_k[0]:03d}-{c_k[1]:03d}-{c_k[2]:03d}"] = im_k
+    from_rgb = TextureMapDataset.convert_cspace("lab")[0]
+    mse_loss = torch.nn.MSELoss(reduction='mean')
+
+    feature_loss_helper = FeatureLossHelper(['relu4_2'], ['relu3_2', 'relu4_2'])
+    feature_loss_helper.move_to_device(torch.device('cuda:0'))
+
+    total_error = 0.
+
+    for tex_k in tqdm(train):
+        im_k = normalize_npy(from_rgb(np.array(Image.open(Path(target_folder) / tex_k / "texture.png")).astype(np.float32)), "lab")
+        im_k_dict[tex_k] = im_k
 
     best_match_dict = {}
     for tex_q in tqdm(val):
-        c_q = [int(y) for y in tex_q.split(',')]
-        im_q = np.array(Image.open(Path(target_folder) / f"{c_q[0]:03d}-{c_q[1]:03d}-{c_q[2]:03d}" / "texture.png")).astype(np.float32)
+        im_q = normalize_npy(from_rgb(np.array(Image.open(Path(target_folder) / tex_q / "texture.png")).astype(np.float32)), "lab")
         min_error = 256*256*256
         best_match = ""
         for tex_k in train:
-            c_k = [int(y) for y in tex_k.split(',')]
-            im_k = im_k_dict[f"{c_k[0]:03d}-{c_k[1]:03d}-{c_k[2]:03d}"]
-            error = np.linalg.norm(im_q - im_k, axis=2).mean()
+            im_k = im_k_dict[tex_k]
+            error = mse_loss(to_torch_tensor(im_q)[:, 0:1, :, :], to_torch_tensor(im_k)[:, 0:1, :, :]).item()
+            # error = feature_loss_helper.calculate_feature_loss(to_torch_tensor(im_q).float().cuda()[:, 0:1, :, :], to_torch_tensor(im_k).float().cuda()[:, 0:1, :, :]).mean().item()
+            # style_loss_maps = feature_loss_helper.calculate_style_loss(to_torch_tensor(im_q).float().cuda()[:, 0:1, :, :], to_torch_tensor(im_k).float().cuda()[:, 0:1, :, :])
+            # error = (style_loss_maps[0].mean() + style_loss_maps[1].mean()).item()
             if error < min_error:
                 min_error = error
-                best_match = f"{c_k[0]:03d}-{c_k[1]:03d}-{c_k[2]:03d}"
-        best_match_dict[f"{c_q[0]:03d}-{c_q[1]:03d}-{c_q[2]:03d}"] = best_match
+                best_match = tex_k
+        total_error += min_error
+        best_match_dict[tex_q] = best_match
     Path(split_folder, "closest_train.json").write_text(json.dumps(best_match_dict))
+    print('Average opt. error:', total_error / len(val))
 
 
 def create_split():
@@ -246,5 +260,12 @@ def run_texture_completion_proc():
     create_texture_completion_task_data(args.dataset, args.patch_range, args.proc, args.num_proc)
 
 
+def run_find_closest_texture():
+    parser = ArgumentParser()
+    parser.add_argument('--dataset', default='SingleShape/CubeTextures', type=str)
+    args = parser.parse_args()
+    find_closest_texture_in_train(args.dataset)
+
+
 if __name__ == "__main__":
-    run_partial_texture_proc()
+    run_find_closest_texture()

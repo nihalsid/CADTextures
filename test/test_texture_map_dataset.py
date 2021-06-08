@@ -2,6 +2,9 @@ from torch.utils.data import DataLoader
 import torch
 from tqdm import tqdm
 import hydra
+import json
+from pathlib import Path
+from PIL import Image
 
 from dataset.texture_completion_dataset import TextureCompletionDataset
 from dataset.texture_end2end_dataset import TextureEnd2EndDataset
@@ -56,16 +59,26 @@ def test_texture_patch_dataset(config, visualize):
 
 
 def test_texture_end2end_dataset(config, visualize):
-    dataset = TextureEnd2EndDataset(config, 'train', {})
-    dataloader = DataLoader(dataset, batch_size=2, shuffle=False, num_workers=0, pin_memory=True)
+    dataset = TextureEnd2EndDataset(config, 'val_vis', {})
+    dataloader = DataLoader(dataset, batch_size=2, shuffle=True, num_workers=0, pin_memory=True)
     for batch_idx, batch in enumerate(tqdm(dataloader)):
         dataset.apply_batch_transforms(batch)
         TextureEnd2EndDataset.move_batch_to_gpu(batch, torch.device('cuda'))
     if visualize:
         for batch_idx, batch in enumerate(tqdm(dataloader)):
+            dataset.add_database_to_batch(config.dataset.num_database_textures, batch, torch.device('cpu'), False)
             dataset.apply_batch_transforms(batch)
             for ii in range(batch['texture'].shape[0]):
-                dataset.visualize_sample_pyplot(batch['partial_texture'][ii].numpy(), batch['texture'][ii].numpy(), batch['mask_texture'][ii].numpy(), batch['database_textures'].numpy())
+                closest = None
+                closest_train = Path(config.dataset.data_dir) / 'splits' / config.dataset.name / 'closest_train.json'
+                if closest_train.exists():
+                    closest_train_dict = json.loads(closest_train.read_text())
+                    if batch['name'][ii] in closest_train_dict:
+                        texture_path = dataset.path_to_dataset / closest_train_dict[batch['name'][ii]] / "surface_texture.png"
+                        if texture_path.exists():
+                            with Image.open(texture_path) as texture_im:
+                                closest = TextureMapDataset.process_to_padded_thumbnail(texture_im, dataset.texture_map_size) / 255
+                dataset.visualize_sample_pyplot(batch['partial_texture'][ii].numpy(), batch['texture'][ii].numpy(), batch['mask_texture'][ii].numpy(), batch['database_textures'].numpy(), closest)
 
 
 @hydra.main(config_path='../config', config_name='refinement')

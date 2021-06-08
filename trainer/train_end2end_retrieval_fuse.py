@@ -4,6 +4,9 @@ import hydra
 import pytorch_lightning as pl
 import torch
 from pathlib import Path
+import numpy as np
+import json
+from PIL import Image
 
 from dataset.texture_end2end_dataset import TextureEnd2EndDataset
 from dataset.texture_map_dataset import TextureMapDataset
@@ -129,7 +132,8 @@ class TextureEnd2EndModule(pl.LightningModule):
                 selections = torch.argmax(torch.einsum('ik,ijk->ij', features_in, features_candidates), dim=1)
                 retrieved_texture = ds_vis.get_patches_with_indices(selections)
                 retrieved_texture = TextureMapDataset.apply_mask_texture(self.fold(retrieved_texture), batch['mask_texture'].cpu())
-                ds_train.visualize_texture_batch(torch.cat([batch['texture'].cpu(), retrieved_texture]).numpy(), output_dir / "val_vis" / f"{batch_idx:04d}.jpg")
+                closest_samples = self.create_closest_textures_list(batch['name'])
+                ds_train.visualize_texture_batch(torch.cat([batch['texture'].cpu(), retrieved_texture]).numpy(), closest_samples, output_dir / "val_vis" / f"{batch_idx:04d}.jpg")
                 total_loss_regression += self.mse_loss(retrieved_texture.to(self.device), batch['texture']).cpu().item()
                 total_loss_contrastive += self.nt_xent_loss(features_in.to(self.device), features_tgt).cpu().item()
         total_loss_regression /= len(ds_vis)
@@ -142,10 +146,24 @@ class TextureEnd2EndModule(pl.LightningModule):
         ds_train.move_batch_to_gpu(batch, self.device)
         with torch.no_grad():
             retrieved_texture, _, _ = self.step(batch, use_argmax=True)
-        ds_train.visualize_texture_batch(torch.cat([batch['texture'], retrieved_texture]).cpu().numpy(), output_dir / "train_batch.jpg")
+        closest_samples = self.create_closest_textures_list(batch['name'])
+        ds_train.visualize_texture_batch(torch.cat([batch['texture'], retrieved_texture]).cpu().numpy(), closest_samples, output_dir / "train_batch.jpg")
 
     def on_post_move_to_device(self):
         self.feature_loss_helper.move_to_device(self.device)
+
+    def create_closest_textures_list(self, names):
+        closest_samples = [None for _ in names]
+        closest_train = Path(self.hparams.dataset.data_dir) / 'splits' / self.hparams.dataset.name / 'closest_train.json'
+        if closest_train.exists():
+            closest_train_dict = json.loads(closest_train.read_text())
+            for idx, name in enumerate(names):
+                if name in closest_train_dict:
+                    texture_path = self.train_dataset.path_to_dataset / closest_train_dict[name] / "surface_texture.png"
+                    if texture_path.exists():
+                        with Image.open(texture_path) as texture_im:
+                            closest_samples[idx] = TextureMapDataset.process_to_padded_thumbnail(texture_im, self.train_dataset.texture_map_size) / 255
+        return closest_samples
 
 
 @hydra.main(config_path='../config', config_name='texture_end2end')
