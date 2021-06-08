@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 from omegaconf.dictconfig import DictConfig
 
@@ -129,31 +130,34 @@ def weights_init(m):
 class Generator(nn.Module):
     def __init__(self, nz, ngf=64, nc=3):
         super(Generator, self).__init__()
-        self.main = nn.Sequential(
-            # input is Z, going into a convolution
-            nn.ConvTranspose2d(nz, 8 * ngf, 4, 2, 1, bias=False),
-            # nn.BatchNorm2d(ngf * 8),
-            nn.ReLU(True),
-            # state size. (ngf*8) x 4 x 4
-            nn.ConvTranspose2d(8 * ngf, 4 * ngf, 4, 2, 1, bias=False),
-            # nn.BatchNorm2d(ngf * 4),
-            nn.ReLU(True),
-            # state size. (ngf*4) x 8 x 8
-            nn.ConvTranspose2d(4 * ngf, 2 * ngf, 4, 2, 1, bias=False),
-            # nn.BatchNorm2d(ngf * 2),
-            nn.ReLU(True),
-            # state size. (ngf*2) x 16 x 16
-            nn.ConvTranspose2d(2 * ngf, ngf, 4, 2, 1, bias=False),
-            # nn.BatchNorm2d(ngf),
-            nn.ReLU(True),
-            # state size. (ngf) x 32 x 32
-            nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
-            nn.Tanh()
-            # state size. (nc) x 64 x 64
-        )
+        self.upconv1 = nn.ConvTranspose2d(nz, 8 * ngf, 4, 2, 1, bias=False)
+        self.upconv2 = nn.ConvTranspose2d(8 * ngf,
+                                          4 * ngf,
+                                          4,
+                                          2,
+                                          1,
+                                          bias=False)
+        self.upconv3 = nn.ConvTranspose2d(4 * ngf,
+                                          2 * ngf,
+                                          4,
+                                          2,
+                                          1,
+                                          bias=False)
+        self.upconv4 = nn.ConvTranspose2d(2 * ngf, ngf, 4, 2, 1, bias=False)
+        self.upconv5 = nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False)
 
     def forward(self, input):
-        return 0.5 * self.main(input)
+        x = self.upconv1(input)
+        x = F.relu(x, inplace=True)
+        x = self.upconv2(x)
+        x = F.relu(x, inplace=True)
+        x = self.upconv3(x)
+        x = F.relu(x, inplace=True)
+        x = self.upconv4(x)
+        x = F.relu(x, inplace=True)
+        x = self.upconv5(x)
+        x = 0.5 * F.tanh(x)
+        return x
 
 
 train_dataset = TextureMapDataset(config, "train", {})
