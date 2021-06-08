@@ -1,11 +1,59 @@
 import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
 import numpy as np
 from omegaconf.dictconfig import DictConfig
 
 from dataset.texture_map_dataset import TextureMapDataset
 from model.texture_gan import TextureGAN
 from util.regression_loss import RegressionLossHelper
+
+config = {
+    'model': {
+        'discriminator_ngf': '${model.input_texture_ngf}',
+        'input_texture_ngf': 32,
+        'render_ngf': 12,
+        'df_ngf': 8,
+        'slim': False
+    },
+    'experiment': '01060846_TestShape_Cube_test_run',
+    'seed': 139,
+    'wandb_main': False,
+    'suffix': '-dev',
+    'save_epoch': 15,
+    'sanity_steps': 1,
+    'max_epoch': 10000,
+    'val_check_percent': 1.0,
+    'val_check_interval': 10,
+    'resume': None,
+    'batch_size': 4,
+    'num_workers': 8,
+    'lr': 0.0001,
+    'lambda_regr_l': 10,
+    'lambda_regr_ab': 10,
+    'lambda_content': 0.075,
+    'lambda_style': 0.0075,
+    'lambda_g': 1,
+    'lambda_g_local': 1,
+    'lambda_gp': 10,
+    'gan_loss_type': 'wgan_gp',
+    'regression_loss_type': 'l2',
+    'num_patches': 5,
+    'patch_size': 25,
+    'dataset': {
+        'name': 'TestShape/Cube',
+        'preload': False,
+        'views_per_shape': 12,
+        'data_dir': 'data',
+        'splits_dir': 'overfit',
+        'texture_map_size': 128,
+        'render_size': 256,
+        'mesh_dir': 'TestShape-model/Cube',
+        'color_space': 'lab'
+    },
+    'inputs': ['partial_texture']
+}
+config = DictConfig(config)
 
 
 def torch_to_np(img_torch):
@@ -59,58 +107,55 @@ def get_noise(input_depth, method, spatial_size, noise_type='u', var=1. / 10):
             np.arange(0, spatial_size[0]) / float(spatial_size[0] - 1))
         meshgrid = np.concatenate([X[None, :], Y[None, :]])
         net_input = np_to_torch(meshgrid)
+    elif method == 'ones':
+        shape = [1, input_depth, spatial_size[0], spatial_size[1]]
+        net_input = torch.ones(shape)
     else:
         assert False
 
     return net_input
 
 
-config = {
-    'model': {
-        'discriminator_ngf': '${model.input_texture_ngf}',
-        'input_texture_ngf': 32,
-        'render_ngf': 12,
-        'df_ngf': 8,
-        'slim': False
-    },
-    'experiment': '01060846_TestShape_Cube_test_run',
-    'seed': 139,
-    'wandb_main': False,
-    'suffix': '-dev',
-    'save_epoch': 15,
-    'sanity_steps': 1,
-    'max_epoch': 10000,
-    'val_check_percent': 1.0,
-    'val_check_interval': 10,
-    'resume': None,
-    'batch_size': 4,
-    'num_workers': 8,
-    'lr': 0.0001,
-    'lambda_regr_l': 10,
-    'lambda_regr_ab': 10,
-    'lambda_content': 0.075,
-    'lambda_style': 0.0075,
-    'lambda_g': 1,
-    'lambda_g_local': 1,
-    'lambda_gp': 10,
-    'gan_loss_type': 'wgan_gp',
-    'regression_loss_type': 'l2',
-    'num_patches': 5,
-    'patch_size': 25,
-    'dataset': {
-        'name': 'TestShape/Cube',
-        'preload': False,
-        'views_per_shape': 12,
-        'data_dir': 'data',
-        'splits_dir': 'overfit',
-        'texture_map_size': 128,
-        'render_size': 256,
-        'mesh_dir': 'TestShape-model/Cube',
-        'color_space': 'lab'
-    },
-    'inputs': ['partial_texture']
-}
-config = DictConfig(config)
+# custom weights initialization called on netG and netD
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        nn.init.normal_(m.weight.data, 0.0, 0.02)
+    elif classname.find('BatchNorm') != -1:
+        nn.init.normal_(m.weight.data, 1.0, 0.02)
+        nn.init.constant_(m.bias.data, 0)
+
+
+class Generator(nn.Module):
+    def __init__(self, nz, ngf=64, nc=3):
+        super(Generator, self).__init__()
+        self.main = nn.Sequential(
+            # input is Z, going into a convolution
+            nn.ConvTranspose2d(nz, 8 * ngf, 4, 2, 1, bias=False),
+            # nn.BatchNorm2d(ngf * 8),
+            nn.ReLU(True),
+            # state size. (ngf*8) x 4 x 4
+            nn.ConvTranspose2d(8 * ngf, 4 * ngf, 4, 2, 1, bias=False),
+            # nn.BatchNorm2d(ngf * 4),
+            nn.ReLU(True),
+            # state size. (ngf*4) x 8 x 8
+            nn.ConvTranspose2d(4 * ngf, 2 * ngf, 4, 2, 1, bias=False),
+            # nn.BatchNorm2d(ngf * 2),
+            nn.ReLU(True),
+            # state size. (ngf*2) x 16 x 16
+            nn.ConvTranspose2d(2 * ngf, ngf, 4, 2, 1, bias=False),
+            # nn.BatchNorm2d(ngf),
+            nn.ReLU(True),
+            # state size. (ngf) x 32 x 32
+            nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
+            nn.Tanh()
+            # state size. (nc) x 64 x 64
+        )
+
+    def forward(self, input):
+        return 0.5 * self.main(input)
+
+
 train_dataset = TextureMapDataset(config, "train", {})
 train_dataloader = torch.utils.data.DataLoader(train_dataset,
                                                batch_size=1,
@@ -118,8 +163,12 @@ train_dataloader = torch.utils.data.DataLoader(train_dataset,
                                                num_workers=0,
                                                pin_memory=True,
                                                drop_last=False)
-num_input_channels = 32
-model = TextureGAN(num_input_channels, 3, config.model.input_texture_ngf)
+
+# model = TextureGAN(num_input_channels, 3, config.model.input_texture_ngf)
+# model = get_texture_nets()
+nz = 1
+model = Generator(nz=nz)
+model.apply(weights_init)
 optimizer = torch.optim.Adam(model.parameters(),
                              lr=config.lr,
                              betas=(0.5, 0.999))
@@ -128,9 +177,11 @@ regression_loss = RegressionLossHelper(config.regression_loss_type)
 sample = next(iter(train_dataloader))
 train_dataset.apply_batch_transforms(sample)
 h, w = sample["partial_texture"].shape[2:]
-input_noise = get_noise(num_input_channels, "noise",
-                        sample["partial_texture"].shape[2:]).type(
-                            sample["partial_texture"].type()).detach()
+# input_noise = get_noise(32, "noise",
+#                         sample["partial_texture"].shape[2:]).type(
+#                             sample["partial_texture"].type()).detach()
+input_noise = get_noise(nz, "ones", np.array([4, 4])).type(
+    sample["partial_texture"].type()).detach()
 # input_noise = torch.ones(1, num_input_channels, h, w)
 
 print(
@@ -141,8 +192,8 @@ print(
 )
 
 # Main optimization loop
-iterations = 1000
-plot_interval = 10
+iterations = 5000
+plot_interval = 20
 for i in range(1, iterations):
     optimizer.zero_grad()
     pred = model(input_noise)
