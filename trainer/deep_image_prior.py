@@ -128,35 +128,99 @@ def weights_init(m):
 
 
 class Generator(nn.Module):
-    def __init__(self, nz, ngf=64, nc=3):
+    def __init__(self, nz, ngf=32, nc=3):
         super(Generator, self).__init__()
-        self.upconv1 = nn.ConvTranspose2d(nz, 8 * ngf, 4, 2, 1, bias=False)
-        self.upconv2 = nn.ConvTranspose2d(8 * ngf,
-                                          4 * ngf,
-                                          4,
-                                          2,
-                                          1,
-                                          bias=False)
-        self.upconv3 = nn.ConvTranspose2d(4 * ngf,
-                                          2 * ngf,
-                                          4,
-                                          2,
-                                          1,
-                                          bias=False)
-        self.upconv4 = nn.ConvTranspose2d(2 * ngf, ngf, 4, 2, 1, bias=False)
-        self.upconv5 = nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False)
+        # self.upconv1 = nn.ConvTranspose2d(nz, 8 * ngf, 4, 2, 1, bias=False)
+        # self.upconv2 = nn.ConvTranspose2d(8 * ngf,
+        #                                   4 * ngf,
+        #                                   4,
+        #                                   2,
+        #                                   1,
+        #                                   bias=False)
+        # self.upconv3 = nn.ConvTranspose2d(4 * ngf,
+        #                                   2 * ngf,
+        #                                   4,
+        #                                   2,
+        #                                   1,
+        #                                   bias=False)
+        # self.upconv4 = nn.ConvTranspose2d(2 * ngf, ngf, 4, 2, 1, bias=False)
+        # self.upconv5 = nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False)
+        k = 3
+        bias = False
+        padding = "reflect"  # "zeros", "reflect"
+        self.conv1 = nn.Conv2d(nz,
+                               8 * ngf,
+                               kernel_size=k,
+                               padding=k // 2,
+                               bias=bias,
+                               stride=1,
+                               padding_mode=padding)
+        self.conv2 = nn.Conv2d(8 * ngf,
+                               4 * ngf,
+                               kernel_size=k,
+                               padding=k // 2,
+                               bias=bias,
+                               stride=1,
+                               padding_mode=padding)
+        self.conv3 = nn.Conv2d(4 * ngf,
+                               2 * ngf,
+                               kernel_size=k,
+                               padding=k // 2,
+                               bias=bias,
+                               stride=1,
+                               padding_mode="zeros")
+        self.conv4 = nn.Conv2d(2 * ngf,
+                               ngf,
+                               kernel_size=k,
+                               padding=k // 2,
+                               bias=bias,
+                               stride=1,
+                               padding_mode=padding)
+        self.conv5 = nn.Conv2d(ngf,
+                               ngf,
+                               kernel_size=k,
+                               padding=k // 2,
+                               bias=bias,
+                               stride=1,
+                               padding_mode=padding)
+        self.conv6 = nn.Conv2d(ngf,
+                               nc,
+                               kernel_size=k,
+                               padding=k // 2,
+                               bias=bias,
+                               stride=1,
+                               padding_mode=padding)
+        self.act = nn.LeakyReLU(0.2, inplace=True)
 
-    def forward(self, input):
-        x = self.upconv1(input)
-        x = F.relu(x, inplace=True)
-        x = self.upconv2(x)
-        x = F.relu(x, inplace=True)
-        x = self.upconv3(x)
-        x = F.relu(x, inplace=True)
-        x = self.upconv4(x)
-        x = F.relu(x, inplace=True)
-        x = self.upconv5(x)
-        x = 0.5 * F.tanh(x)
+    def forward(self, x):
+        # x = self.upconv1(input)
+        # x = F.relu(x, inplace=True)
+        # x = self.upconv2(x)
+        # x = F.relu(x, inplace=True)
+        # x = self.upconv3(x)
+        # x = F.relu(x, inplace=True)
+        # x = self.upconv4(x)
+        # x = F.relu(x, inplace=True)
+        # x = self.upconv5(x)
+
+        # x = F.upsample_nearest(x, scale_factor=2)
+        x = self.conv1(x)
+        x = self.act(x)
+        x = F.upsample_nearest(x, scale_factor=2)
+        x = self.conv2(x)
+        x = self.act(x)
+        x = F.upsample_nearest(x, scale_factor=2)
+        x = self.conv3(x)
+        x = self.act(x)
+        x = F.upsample_nearest(x, scale_factor=2)
+        x = self.conv4(x)
+        x = self.act(x)
+        x = F.upsample_nearest(x, scale_factor=2)
+        x = self.conv5(x)
+        x = self.act(x)
+        x = F.upsample_nearest(x, scale_factor=2)
+        x = self.conv6(x)
+        # x = 0.5 * torch.tanh(x)
         return x
 
 
