@@ -11,7 +11,7 @@ from PIL import Image
 from dataset.texture_end2end_dataset import TextureEnd2EndDataset
 from dataset.texture_map_dataset import TextureMapDataset
 from model.attention import Fold2D
-from model.retrieval import Patch16, Patch16MLP, get_target_feature_extractor, get_input_feature_extractor
+from model.retrieval import get_target_feature_extractor, get_input_feature_extractor
 from trainer.train_texture_map_predictor import TextureMapPredictorModule
 from util.contrastive_loss import NTXentLoss
 from util.feature_loss import FeatureLossHelper

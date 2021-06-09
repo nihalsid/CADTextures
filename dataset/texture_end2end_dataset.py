@@ -44,7 +44,7 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
                         'partial_texture': partial_texture_list,
                     }
         if config.dataset.splits_dir.startswith('overfit'):
-            multiplier = 240 if split == 'train' else 1
+            multiplier = 240 if split == 'train' else 2
             self.items = self.items * multiplier
             self.train_items = self.train_items * 240
 
@@ -147,6 +147,24 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
             if closest_batch[0] is not None:
                 axarr[2, i].imshow(closest_batch[i])
                 axarr[2, i].axis('off')
+        plt.tight_layout()
+        plt.savefig(outpath, bbox_inches='tight', dpi=240)
+        plt.close()
+
+    def visualize_texture_knn_batch(self, knn_batch, K, outpath):
+        import matplotlib.pyplot as plt
+        knn_batch = knn_batch.copy()
+        num_items = knn_batch.shape[0] // (K + 1)
+        knn_columns = []
+        for i in range(K + 1):
+            knn_batch_column = [self.denormalize_and_rgb(np.transpose(knn_batch[i * num_items + j, :, :, :], (1, 2, 0))) for j in range(num_items)]
+            knn_columns.append(knn_batch_column)
+
+        f, axarr = plt.subplots(num_items, K + 1, figsize=(4 * (K + 1), 4 * num_items))
+        for i in range(num_items):
+            for j in range(K + 1):
+                axarr[i, j].imshow(knn_columns[j][i])
+                axarr[i, j].axis('off')
         plt.tight_layout()
         plt.savefig(outpath, bbox_inches='tight', dpi=240)
         plt.close()
