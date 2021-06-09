@@ -94,10 +94,10 @@ class TextureEnd2EndModule(pl.LightningModule):
         style_loss_maps = self.feature_loss_helper.calculate_style_loss(gt_texture_l, retrieved_texture_l)
         loss_style = style_loss_maps[0].mean() + style_loss_maps[1].mean()
         loss_ntxent = self.nt_xent_loss(features_in, features_tgt)
-        self.log("train/loss_regression_l", loss_regression_l, on_step=True, on_epoch=True, prog_bar=False, logger=True)
-        self.log("train/loss_regression_ab", loss_regression_ab, on_step=True, on_epoch=True, prog_bar=False, logger=True)
-        self.log("train/loss_content", loss_content, on_step=True, on_epoch=True, prog_bar=False, logger=True)
-        self.log("train/loss_style", loss_style, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        self.log("train/loss_regression_l", self.hparams.lambda_regr_l * loss_regression_l, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        self.log("train/loss_regression_ab", self.hparams.lambda_regr_ab * loss_regression_ab, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        self.log("train/loss_content", self.hparams.lambda_content * loss_content, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        self.log("train/loss_style", self.hparams.lambda_style * loss_style, on_step=True, on_epoch=True, prog_bar=False, logger=True)
         loss_total = loss_regression_l * self.hparams.lambda_regr_l + loss_regression_ab * self.hparams.lambda_regr_ab + loss_content * self.hparams.lambda_content + loss_style * self.hparams.lambda_style \
                      + loss_ntxent * self.current_contrastive_weight
         self.log("learning_rate", self.current_learning_rate, on_step=True, on_epoch=False, prog_bar=False, logger=True)
