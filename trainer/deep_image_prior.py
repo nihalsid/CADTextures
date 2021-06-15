@@ -95,10 +95,10 @@ def get_noise(input_depth, method, spatial_size, noise_type='u', var=1. / 10):
     """
     if isinstance(spatial_size, int):
         spatial_size = (spatial_size, spatial_size)
-    if method == 'noise':
-        shape = [1, input_depth, spatial_size[0], spatial_size[1]]
-        net_input = torch.zeros(shape)
+    shape = [1, input_depth, spatial_size[0], spatial_size[1]]
 
+    if method == 'noise':
+        net_input = torch.zeros(shape)
         fill_noise(net_input, noise_type)
         net_input *= var
     elif method == 'meshgrid':
@@ -109,10 +109,15 @@ def get_noise(input_depth, method, spatial_size, noise_type='u', var=1. / 10):
         meshgrid = np.concatenate([X[None, :], Y[None, :]])
         net_input = np_to_torch(meshgrid)
     elif method == 'ones':
-        shape = [1, input_depth, spatial_size[0], spatial_size[1]]
         net_input = torch.ones(shape)
+    elif method == 'pe': # positional encoding
+        h, w = spatial_size[0], spatial_size[1]
+        X = torch.arange(0, w).tile(h, 1) * (2 * np.pi / w) 
+        Y = torch.arange(0, h).tile(w, 1).T * (2 * np.pi / h) 
+        # net_input = torch.stack((X, Y), dim=0)
+        net_input = (torch.sin(X) + torch.cos(Y)).view(shape)
     else:
-        assert False
+        raise NotImplementedError
 
     return net_input
 
@@ -184,7 +189,8 @@ h, w = sample["partial_texture"].shape[2:]
 # input_noise = get_noise(32, "noise",
 #                         sample["partial_texture"].shape[2:]).type(
 #                             sample["partial_texture"].type()).detach()
-input_noise = get_noise(nz, "ones", np.array([4, 4])).type(
+#     sample["partial_texture"].type()).detach()
+input_noise = get_noise(nz, "pe", np.array([4, 4])).type(
     sample["partial_texture"].type()).detach()
 # input_noise = torch.ones(1, num_input_channels, h, w)
 
