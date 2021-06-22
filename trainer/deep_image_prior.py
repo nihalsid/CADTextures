@@ -50,7 +50,7 @@ config = {
         'texture_map_size': 128,
         'render_size': 256,
         'mesh_dir': 'TestShape-model/Cube',
-        'color_space': 'lab'
+        'color_space': 'rgb'
     },
     'inputs': ['partial_texture']
 }
@@ -251,6 +251,13 @@ h, w = sample["partial_texture"].shape[2:]
 input_noise = get_noise(nz, "ones", np.array([4, 4])).type(
     sample["partial_texture"].type()).detach()
 # input_noise = torch.ones(1, num_input_channels, h, w)
+# mask = torch.any(
+#     ~sample["partial_texture"].eq(sample["partial_texture"][0:1, :, 0:1, 0:1]),
+#     dim=1,
+#     keepdim=True)
+
+# This is a hack
+mask = torch.all(sample["partial_texture"] > -0.4, dim=1, keepdim=True)
 
 print(
     f'sample["partial_texture"] in [{sample["partial_texture"].min():.3f}, {sample["partial_texture"].max()}:.3f]'
@@ -265,8 +272,12 @@ plot_interval = 20
 for i in range(1, iterations):
     optimizer.zero_grad()
     pred = model(input_noise)
-    loss_regression = regression_loss.calculate_loss(
-        sample["partial_texture"], pred * sample["mask_texture"]).mean()
+    # mask = torch.any(
+    #     sample["partial_texture"] == sample["partial_texture"][0, :, 0, 0],
+    #     dim=1,
+    #     keepdim=True)
+    loss_regression = regression_loss.calculate_loss(sample["partial_texture"],
+                                                     pred * mask).mean()
     loss_regression.backward()
     optimizer.step()
 
@@ -277,15 +288,23 @@ for i in range(1, iterations):
                 f'loss_regression={loss_regression:.6f}, pred in [{pred.min():.3f}, {pred.max():.3f}]'
             )
 
-            plt.subplot(131)
+            plt.subplot(221)
             input = torch_to_np(sample["partial_texture"].clone())
             input = train_dataset.get_colored_data_for_visualization(input)
             plt.imshow(input)
             plt.axis("off")
-            plt.title("input")
+            plt.title("partial_texture")
             plt.draw()
 
-            plt.subplot(132)
+            plt.subplot(222)
+            _mask = torch_to_np(mask.float().repeat((1, 3, 1, 1)).clone())
+            # _mask = train_dataset.get_colored_data_for_visualization(_mask)
+            plt.imshow(_mask)
+            plt.axis("off")
+            plt.title("mask")
+            plt.draw()
+
+            plt.subplot(223)
             gt = torch_to_np(sample["texture"].clone())
             gt = train_dataset.get_colored_data_for_visualization(gt)
             plt.imshow(gt)
@@ -293,7 +312,7 @@ for i in range(1, iterations):
             plt.title("gt")
             plt.draw()
 
-            plt.subplot(133)
+            plt.subplot(224)
             pred = torch_to_np(pred)
             pred = train_dataset.get_colored_data_for_visualization(pred)
             plt.imshow(pred)
