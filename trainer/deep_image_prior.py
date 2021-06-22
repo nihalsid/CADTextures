@@ -50,7 +50,7 @@ config = {
         'texture_map_size': 128,
         'render_size': 256,
         'mesh_dir': 'TestShape-model/Cube',
-        'color_space': 'lab'
+        'color_space': 'rgb'
     },
     'inputs': ['partial_texture']
 }
@@ -133,35 +133,99 @@ def weights_init(m):
 
 
 class Generator(nn.Module):
-    def __init__(self, nz, ngf=64, nc=3):
+    def __init__(self, nz, ngf=32, nc=3):
         super(Generator, self).__init__()
-        self.upconv1 = nn.ConvTranspose2d(nz, 8 * ngf, 4, 2, 1, bias=False)
-        self.upconv2 = nn.ConvTranspose2d(8 * ngf,
-                                          4 * ngf,
-                                          4,
-                                          2,
-                                          1,
-                                          bias=False)
-        self.upconv3 = nn.ConvTranspose2d(4 * ngf,
-                                          2 * ngf,
-                                          4,
-                                          2,
-                                          1,
-                                          bias=False)
-        self.upconv4 = nn.ConvTranspose2d(2 * ngf, ngf, 4, 2, 1, bias=False)
-        self.upconv5 = nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False)
+        # self.upconv1 = nn.ConvTranspose2d(nz, 8 * ngf, 4, 2, 1, bias=False)
+        # self.upconv2 = nn.ConvTranspose2d(8 * ngf,
+        #                                   4 * ngf,
+        #                                   4,
+        #                                   2,
+        #                                   1,
+        #                                   bias=False)
+        # self.upconv3 = nn.ConvTranspose2d(4 * ngf,
+        #                                   2 * ngf,
+        #                                   4,
+        #                                   2,
+        #                                   1,
+        #                                   bias=False)
+        # self.upconv4 = nn.ConvTranspose2d(2 * ngf, ngf, 4, 2, 1, bias=False)
+        # self.upconv5 = nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False)
+        k = 3
+        bias = False
+        padding = "reflect"  # "zeros", "reflect"
+        self.conv1 = nn.Conv2d(nz,
+                               8 * ngf,
+                               kernel_size=k,
+                               padding=k // 2,
+                               bias=bias,
+                               stride=1,
+                               padding_mode=padding)
+        self.conv2 = nn.Conv2d(8 * ngf,
+                               4 * ngf,
+                               kernel_size=k,
+                               padding=k // 2,
+                               bias=bias,
+                               stride=1,
+                               padding_mode=padding)
+        self.conv3 = nn.Conv2d(4 * ngf,
+                               2 * ngf,
+                               kernel_size=k,
+                               padding=k // 2,
+                               bias=bias,
+                               stride=1,
+                               padding_mode="zeros")
+        self.conv4 = nn.Conv2d(2 * ngf,
+                               ngf,
+                               kernel_size=k,
+                               padding=k // 2,
+                               bias=bias,
+                               stride=1,
+                               padding_mode=padding)
+        self.conv5 = nn.Conv2d(ngf,
+                               ngf,
+                               kernel_size=k,
+                               padding=k // 2,
+                               bias=bias,
+                               stride=1,
+                               padding_mode=padding)
+        self.conv6 = nn.Conv2d(ngf,
+                               nc,
+                               kernel_size=k,
+                               padding=k // 2,
+                               bias=bias,
+                               stride=1,
+                               padding_mode=padding)
+        self.act = nn.LeakyReLU(0.2, inplace=True)
 
-    def forward(self, input):
-        x = self.upconv1(input)
-        x = F.relu(x, inplace=True)
-        x = self.upconv2(x)
-        x = F.relu(x, inplace=True)
-        x = self.upconv3(x)
-        x = F.relu(x, inplace=True)
-        x = self.upconv4(x)
-        x = F.relu(x, inplace=True)
-        x = self.upconv5(x)
-        x = 0.5 * F.tanh(x)
+    def forward(self, x):
+        # x = self.upconv1(input)
+        # x = F.relu(x, inplace=True)
+        # x = self.upconv2(x)
+        # x = F.relu(x, inplace=True)
+        # x = self.upconv3(x)
+        # x = F.relu(x, inplace=True)
+        # x = self.upconv4(x)
+        # x = F.relu(x, inplace=True)
+        # x = self.upconv5(x)
+
+        # x = F.upsample_nearest(x, scale_factor=2)
+        x = self.conv1(x)
+        x = self.act(x)
+        x = F.upsample_nearest(x, scale_factor=2)
+        x = self.conv2(x)
+        x = self.act(x)
+        x = F.upsample_nearest(x, scale_factor=2)
+        x = self.conv3(x)
+        x = self.act(x)
+        x = F.upsample_nearest(x, scale_factor=2)
+        x = self.conv4(x)
+        x = self.act(x)
+        x = F.upsample_nearest(x, scale_factor=2)
+        x = self.conv5(x)
+        x = self.act(x)
+        x = F.upsample_nearest(x, scale_factor=2)
+        x = self.conv6(x)
+        # x = 0.5 * torch.tanh(x)
         return x
 
 
@@ -193,6 +257,13 @@ h, w = sample["partial_texture"].shape[2:]
 input_noise = get_noise(nz, "pe", np.array([4, 4])).type(
     sample["partial_texture"].type()).detach()
 # input_noise = torch.ones(1, num_input_channels, h, w)
+# mask = torch.any(
+#     ~sample["partial_texture"].eq(sample["partial_texture"][0:1, :, 0:1, 0:1]),
+#     dim=1,
+#     keepdim=True)
+
+# This is a hack
+mask = torch.all(sample["partial_texture"] > -0.4, dim=1, keepdim=True)
 
 print(
     f'sample["partial_texture"] in [{sample["partial_texture"].min():.3f}, {sample["partial_texture"].max()}:.3f]'
@@ -207,8 +278,12 @@ plot_interval = 20
 for i in range(1, iterations):
     optimizer.zero_grad()
     pred = model(input_noise)
-    loss_regression = regression_loss.calculate_loss(
-        sample["partial_texture"], pred * sample["mask_texture"]).mean()
+    # mask = torch.any(
+    #     sample["partial_texture"] == sample["partial_texture"][0, :, 0, 0],
+    #     dim=1,
+    #     keepdim=True)
+    loss_regression = regression_loss.calculate_loss(sample["partial_texture"],
+                                                     pred * mask).mean()
     loss_regression.backward()
     optimizer.step()
 
@@ -219,15 +294,23 @@ for i in range(1, iterations):
                 f'loss_regression={loss_regression:.6f}, pred in [{pred.min():.3f}, {pred.max():.3f}]'
             )
 
-            plt.subplot(131)
+            plt.subplot(221)
             input = torch_to_np(sample["partial_texture"].clone())
             input = train_dataset.get_colored_data_for_visualization(input)
             plt.imshow(input)
             plt.axis("off")
-            plt.title("input")
+            plt.title("partial_texture")
             plt.draw()
 
-            plt.subplot(132)
+            plt.subplot(222)
+            _mask = torch_to_np(mask.float().repeat((1, 3, 1, 1)).clone())
+            # _mask = train_dataset.get_colored_data_for_visualization(_mask)
+            plt.imshow(_mask)
+            plt.axis("off")
+            plt.title("mask")
+            plt.draw()
+
+            plt.subplot(223)
             gt = torch_to_np(sample["texture"].clone())
             gt = train_dataset.get_colored_data_for_visualization(gt)
             plt.imshow(gt)
@@ -235,7 +318,7 @@ for i in range(1, iterations):
             plt.title("gt")
             plt.draw()
 
-            plt.subplot(133)
+            plt.subplot(224)
             pred = torch_to_np(pred)
             pred = train_dataset.get_colored_data_for_visualization(pred)
             plt.imshow(pred)
