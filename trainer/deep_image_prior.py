@@ -110,12 +110,19 @@ def get_noise(input_depth, method, spatial_size, noise_type='u', var=1. / 10):
         net_input = np_to_torch(meshgrid)
     elif method == 'ones':
         net_input = torch.ones(shape)
-    elif method == 'pe': # positional encoding
+    elif method == 'pe':  # positional encoding
         h, w = spatial_size[0], spatial_size[1]
-        X = torch.arange(0, w).tile(h, 1) * (2 * np.pi / w) 
-        Y = torch.arange(0, h).tile(w, 1).T * (2 * np.pi / h) 
-        # net_input = torch.stack((X, Y), dim=0)
-        net_input = (torch.sin(X) + torch.cos(Y)).view(shape)
+        X = torch.arange(0, w).tile(h, 1)
+        Y = torch.arange(0, h).tile(w, 1).T
+        tensor_list = []
+        for i in range(0, input_depth):
+            multiplier = (i + 1) * (2 * np.pi)
+            _sin = torch.sin(X * (multiplier / w))
+            _cos = torch.cos(Y * (multiplier / h))
+            tensor_list.append(_sin)
+            tensor_list.append(_cos)
+        net_input = torch.stack(tensor_list)
+        net_input = net_input.unsqueeze(0)
     else:
         raise NotImplementedError
 
@@ -132,100 +139,163 @@ def weights_init(m):
         nn.init.constant_(m.bias.data, 0)
 
 
+# class Generator(nn.Module):
+#     def __init__(self, nz, ngf=64, nc=3):
+#         super(Generator, self).__init__()
+#         bias = True
+#         self.upconv1 = nn.TransposeConv2d(nz, 8 * ngf, 4, 2, 1, bias=bias)
+#         self.upconv2 = nn.TransposeConv2d(8 * ngf, 4 * ngf, 4, 2, 1, bias=bias)
+#         self.upconv3 = nn.TransposeConv2d(4 * ngf, 2 * ngf, 4, 2, 1, bias=bias)
+#         self.upconv4 = nn.TransposeConv2d(2 * ngf, ngf, 4, 2, 1, bias=bias)
+#         self.upconv5 = nn.TransposeConv2d(ngf, nc, 4, 2, 1, bias=bias)
+
+#     def forward(self, input):
+#         x = self.upconv1(input)
+#         x = F.relu(x, inplace=True)
+#         x = self.upconv2(x)
+#         x = F.relu(x, inplace=True)
+#         x = self.upconv3(x)
+#         x = F.relu(x, inplace=True)
+#         x = self.upconv4(x)
+#         x = F.relu(x, inplace=True)
+#         x = self.upconv5(x)
+#         x = 0.5 * F.tanh(x)
+#         return x
+
+# class Generator(nn.Module):
+#     def __init__(self, nz, ngf=64, nc=3):
+#         super(Generator, self).__init__()
+#         bias = True
+#         kernel = 5
+#         stride = 2
+#         padding = (kernel - 1) // 2
+
+#         self.downconv1 = nn.Conv2d(nz,
+#                                    ngf,
+#                                    kernel,
+#                                    stride,
+#                                    padding,
+#                                    padding_mode="reflect",
+#                                    bias=bias)
+#         self.downconv2 = nn.Conv2d(ngf,
+#                                    2 * ngf,
+#                                    kernel,
+#                                    stride,
+#                                    padding,
+#                                    padding_mode="reflect",
+#                                    bias=bias)
+#         self.downconv3 = nn.Conv2d(2 * ngf,
+#                                    4 * ngf,
+#                                    kernel,
+#                                    stride,
+#                                    padding,
+#                                    padding_mode="reflect",
+#                                    bias=bias)
+
+#         stride = 1
+#         padding = (kernel - 1) // 2
+#         self.upconv3 = nn.Conv2d(4 * ngf,
+#                                  2 * ngf,
+#                                  kernel,
+#                                  stride,
+#                                  padding,
+#                                  padding_mode="reflect",
+#                                  bias=bias)
+#         self.upconv2 = nn.Conv2d(2 * ngf,
+#                                  ngf,
+#                                  kernel,
+#                                  stride,
+#                                  padding,
+#                                  padding_mode="reflect",
+#                                  bias=bias)
+#         self.upconv1 = nn.Conv2d(ngf,
+#                                  nc,
+#                                  kernel,
+#                                  stride,
+#                                  padding,
+#                                  padding_mode="reflect",
+#                                  bias=bias)
+
+#     def forward(self, x):
+#         # downsampling
+#         x = self.downconv1(x)
+#         x = F.relu(x, inplace=True)
+#         x = self.downconv2(x)
+#         x = F.relu(x, inplace=True)
+#         x = self.downconv3(x)
+#         x = F.relu(x, inplace=True)
+
+#         # upsampling
+#         x = F.upsample_nearest(x, scale_factor=2)
+#         x = self.upconv3(x)
+#         x = F.relu(x, inplace=True)
+#         x = F.dropout2d(x, p=0.2, inplace=False)
+#         x = F.upsample_nearest(x, scale_factor=2)
+#         x = self.upconv2(x)
+#         x = F.relu(x, inplace=True)
+#         x = F.dropout2d(x, p=0.2, inplace=False)
+#         x = F.upsample_nearest(x, scale_factor=2)
+#         x = self.upconv1(x)
+#         x = 0.5 * F.tanh(x)
+#         return x
+
+
 class Generator(nn.Module):
     def __init__(self, nz, ngf=32, nc=3):
         super(Generator, self).__init__()
-        # self.upconv1 = nn.ConvTranspose2d(nz, 8 * ngf, 4, 2, 1, bias=False)
-        # self.upconv2 = nn.ConvTranspose2d(8 * ngf,
-        #                                   4 * ngf,
-        #                                   4,
-        #                                   2,
-        #                                   1,
-        #                                   bias=False)
-        # self.upconv3 = nn.ConvTranspose2d(4 * ngf,
-        #                                   2 * ngf,
-        #                                   4,
-        #                                   2,
-        #                                   1,
-        #                                   bias=False)
-        # self.upconv4 = nn.ConvTranspose2d(2 * ngf, ngf, 4, 2, 1, bias=False)
-        # self.upconv5 = nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False)
-        k = 3
-        bias = False
-        padding = "reflect"  # "zeros", "reflect"
+        bias = True
+        kernel = 5
+        stride = 1
+        padding = (kernel - 1) // 2
+        mode = "circular"  # "reflect"
+
         self.conv1 = nn.Conv2d(nz,
-                               8 * ngf,
-                               kernel_size=k,
-                               padding=k // 2,
-                               bias=bias,
-                               stride=1,
-                               padding_mode=padding)
-        self.conv2 = nn.Conv2d(8 * ngf,
-                               4 * ngf,
-                               kernel_size=k,
-                               padding=k // 2,
-                               bias=bias,
-                               stride=1,
-                               padding_mode=padding)
-        self.conv3 = nn.Conv2d(4 * ngf,
-                               2 * ngf,
-                               kernel_size=k,
-                               padding=k // 2,
-                               bias=bias,
-                               stride=1,
-                               padding_mode="zeros")
-        self.conv4 = nn.Conv2d(2 * ngf,
                                ngf,
-                               kernel_size=k,
-                               padding=k // 2,
-                               bias=bias,
-                               stride=1,
-                               padding_mode=padding)
+                               kernel,
+                               stride,
+                               padding,
+                               padding_mode=mode,
+                               bias=bias)
+        self.conv2 = nn.Conv2d(ngf,
+                               ngf,
+                               kernel,
+                               stride,
+                               padding,
+                               padding_mode=mode,
+                               bias=bias)
+        self.conv3 = nn.Conv2d(ngf,
+                               ngf,
+                               kernel,
+                               stride,
+                               padding,
+                               padding_mode=mode,
+                               bias=bias)
+        self.conv4 = nn.Conv2d(ngf,
+                               ngf,
+                               kernel,
+                               stride,
+                               padding,
+                               padding_mode=mode,
+                               bias=bias)
         self.conv5 = nn.Conv2d(ngf,
-                               ngf,
-                               kernel_size=k,
-                               padding=k // 2,
-                               bias=bias,
-                               stride=1,
-                               padding_mode=padding)
-        self.conv6 = nn.Conv2d(ngf,
-                               nc,
-                               kernel_size=k,
-                               padding=k // 2,
-                               bias=bias,
-                               stride=1,
-                               padding_mode=padding)
-        self.act = nn.LeakyReLU(0.2, inplace=True)
+                               3,
+                               kernel,
+                               stride,
+                               padding,
+                               padding_mode=mode,
+                               bias=bias)
 
     def forward(self, x):
-        # x = self.upconv1(input)
-        # x = F.relu(x, inplace=True)
-        # x = self.upconv2(x)
-        # x = F.relu(x, inplace=True)
-        # x = self.upconv3(x)
-        # x = F.relu(x, inplace=True)
-        # x = self.upconv4(x)
-        # x = F.relu(x, inplace=True)
-        # x = self.upconv5(x)
-
-        # x = F.upsample_nearest(x, scale_factor=2)
         x = self.conv1(x)
-        x = self.act(x)
-        x = F.upsample_nearest(x, scale_factor=2)
+        x = F.relu(x, inplace=True)
         x = self.conv2(x)
-        x = self.act(x)
-        x = F.upsample_nearest(x, scale_factor=2)
+        x = F.relu(x, inplace=True)
         x = self.conv3(x)
-        x = self.act(x)
-        x = F.upsample_nearest(x, scale_factor=2)
+        x = F.relu(x, inplace=True)
         x = self.conv4(x)
-        x = self.act(x)
-        x = F.upsample_nearest(x, scale_factor=2)
+        x = F.relu(x, inplace=True)
         x = self.conv5(x)
-        x = self.act(x)
-        x = F.upsample_nearest(x, scale_factor=2)
-        x = self.conv6(x)
-        # x = 0.5 * torch.tanh(x)
+        x = 0.5 * torch.tanh(x)
         return x
 
 
@@ -239,38 +309,41 @@ train_dataloader = torch.utils.data.DataLoader(train_dataset,
 
 # model = TextureGAN(num_input_channels, 3, config.model.input_texture_ngf)
 # model = get_texture_nets()
-nz = 1
-model = Generator(nz=nz)
+nz = 4
+model = Generator(nz=2 * nz, ngf=64)
 model.apply(weights_init)
 optimizer = torch.optim.Adam(model.parameters(),
                              lr=config.lr,
-                             betas=(0.5, 0.999))
+                             betas=(0.9, 0.999))
 regression_loss = RegressionLossHelper(config.regression_loss_type)
 
-sample = next(iter(train_dataloader))
-train_dataset.apply_batch_transforms(sample)
-h, w = sample["partial_texture"].shape[2:]
-# input_noise = get_noise(32, "noise",
-#                         sample["partial_texture"].shape[2:]).type(
-#                             sample["partial_texture"].type()).detach()
-#     sample["partial_texture"].type()).detach()
-input_noise = get_noise(nz, "pe", np.array([4, 4])).type(
-    sample["partial_texture"].type()).detach()
-# input_noise = torch.ones(1, num_input_channels, h, w)
-# mask = torch.any(
-#     ~sample["partial_texture"].eq(sample["partial_texture"][0:1, :, 0:1, 0:1]),
-#     dim=1,
-#     keepdim=True)
+with torch.no_grad():
+    sample = next(iter(train_dataloader))
+    train_dataset.apply_batch_transforms(sample)
+    h, w = sample["partial_texture"].shape[2:]
+    # input_noise = get_noise(32, "noise",
+    #                         sample["partial_texture"].shape[2:]).type(
+    #                             sample["partial_texture"].type()).detach()
+    # input_noise = get_noise(nz, "ones", np.array([4, 4])).type(
+    #     sample["partial_texture"].type()).detach()
+    input_noise = get_noise(nz, "pe", np.array([128, 128])).type(
+        sample["partial_texture"].type()).detach()
+    # sinusoidal input?
+    # input_noise = torch.ones(1, num_input_channels, h, w)
+    # mask = torch.any(
+    #     ~sample["partial_texture"].eq(sample["partial_texture"][0:1, :, 0:1, 0:1]),
+    #     dim=1,
+    #     keepdim=True)
 
-# This is a hack
-mask = torch.all(sample["partial_texture"] > -0.4, dim=1, keepdim=True)
+    # This is a hack
+    mask = torch.all(sample["partial_texture"] > -0.4, dim=1, keepdim=True)
 
-print(
-    f'sample["partial_texture"] in [{sample["partial_texture"].min():.3f}, {sample["partial_texture"].max()}:.3f]'
-)
-print(
-    f'sample["texture"] in [{sample["texture"].min():.3f}, {sample["texture"].max():.3f}]'
-)
+    print(
+        f'sample["partial_texture"] in [{sample["partial_texture"].min():.3f}, {sample["partial_texture"].max():.3f}]'
+    )
+    print(
+        f'sample["texture"] in [{sample["texture"].min():.3f}, {sample["texture"].max():.3f}]'
+    )
 
 # Main optimization loop
 iterations = 5000
@@ -283,7 +356,8 @@ for i in range(1, iterations):
     #     dim=1,
     #     keepdim=True)
     loss_regression = regression_loss.calculate_loss(sample["partial_texture"],
-                                                     pred * mask).mean()
+                                                     pred *
+                                                     mask.detach()).mean()
     loss_regression.backward()
     optimizer.step()
 
