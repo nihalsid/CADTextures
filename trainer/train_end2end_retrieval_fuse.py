@@ -4,9 +4,11 @@ import hydra
 import pytorch_lightning as pl
 import torch
 from pathlib import Path
-import numpy as np
 import json
 from PIL import Image
+import os
+
+from pytorch_lightning.plugins import DDPPlugin
 
 from dataset.texture_end2end_dataset import TextureEnd2EndDataset
 from dataset.texture_map_dataset import TextureMapDataset
@@ -68,7 +70,7 @@ class TextureEnd2EndModule(pl.LightningModule):
     def step(self, batch, use_argmax=False):
         self.train_dataset.add_database_to_batch(self.hparams.batch_size * self.hparams.dataset.num_database_textures, batch, self.device, self.hparams.dictionary.patch_size == 128)
         self.train_dataset.apply_batch_transforms(batch)
-        features_in = self.fenc_input(batch['partial_texture'])
+        features_in, features_in_attn = self.fenc_input.forward_with_attention(batch['partial_texture'], batch['mask_missing'])
         features_tgt_normed = torch.nn.functional.normalize(self.fenc_target(self.train_dataset.unfold(batch['texture'])), dim=1)
         features_candidates = self.fenc_target(batch['database_textures'])
         features_in_normed, features_candidates_normed = torch.nn.functional.normalize(features_in, dim=1), torch.nn.functional.normalize(features_candidates, dim=1)
@@ -82,10 +84,10 @@ class TextureEnd2EndModule(pl.LightningModule):
             selection_mask = torch.nn.functional.gumbel_softmax(scaled_similarity_scores, tau=1, hard=True)
             selected_patches = torch.einsum('ij,ijk->ik', selection_mask, candidates)
         selected_patches = selected_patches.view(similarity_scores.shape[0], batch['database_textures'].shape[1], batch['database_textures'].shape[2], batch['database_textures'].shape[3])
-        return TextureMapDataset.apply_mask_texture(self.fold(selected_patches), batch['mask_texture']), features_in_normed, features_tgt_normed
+        return TextureMapDataset.apply_mask_texture(self.fold(selected_patches), batch['mask_texture']), features_in_normed, features_tgt_normed, features_in_attn
 
     def training_step(self, batch, batch_idx):
-        retrieved_texture, features_in, features_tgt = self.step(batch)
+        retrieved_texture, features_in, features_tgt, _ = self.step(batch)
         gt_texture_l, gt_texture_ab = TextureMapPredictorModule.split_into_channels(batch['texture'])
         retrieved_texture_l, retrieved_texture_ab = TextureMapPredictorModule.split_into_channels(retrieved_texture)
         loss_regression_l = self.regression_loss.calculate_loss(gt_texture_l, retrieved_texture_l).mean()
@@ -111,45 +113,47 @@ class TextureEnd2EndModule(pl.LightningModule):
         pass
 
     def validation_epoch_end(self, outputs):
-        dataset = lambda split: TextureEnd2EndDataset(self.hparams, split, self.preload_dict, single_view=True)
-        output_dir = Path("runs") / self.hparams.experiment / "visualization" / f"epoch_{self.current_epoch:04d}"
-        output_dir.mkdir(exist_ok=True, parents=True)
-        ds_train = dataset('train')
+        if int(os.environ.get('LOCAL_RANK', 0)) == 0:
+            dataset = lambda split: TextureEnd2EndDataset(self.hparams, split, self.preload_dict, single_view=True)
+            output_dir = Path("runs") / self.hparams.experiment / "visualization" / f"epoch_{self.current_epoch:04d}"
+            output_dir.mkdir(exist_ok=True, parents=True)
+            ds_train = dataset('train')
 
-        (output_dir / "val_vis").mkdir(exist_ok=True)
-        ds_vis = dataset('val_vis')
-        loader = torch.utils.data.DataLoader(ds_vis, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, drop_last=False, pin_memory=True)
-        total_loss_regression = 0
-        total_loss_contrastive = 0
-        with torch.no_grad():
-            candidate_codes = ds_vis.get_all_texture_patch_codes(self.fenc_target, self.device, self.hparams.batch_size)
-            for batch_idx, batch in enumerate(loader):
-                ds_vis.move_batch_to_gpu(batch, self.device)
-                ds_vis.apply_batch_transforms(batch)
-                features_in = torch.nn.functional.normalize(self.fenc_input(batch['partial_texture']), dim=1).cpu()
-                features_tgt = torch.nn.functional.normalize(self.fenc_target(ds_vis.unfold(batch['texture'])), dim=1)
-                features_candidates = candidate_codes.unsqueeze(0).expand(features_in.shape[0], -1, -1)
-                selections = torch.argmax(torch.einsum('ik,ijk->ij', features_in, features_candidates), dim=1)
-                retrieved_texture = ds_vis.get_patches_with_indices(selections)
-                retrieved_texture = TextureMapDataset.apply_mask_texture(self.fold(retrieved_texture), batch['mask_texture'].cpu())
-                closest_samples = self.create_closest_textures_list(batch['name'])
-                ds_train.visualize_texture_batch(torch.cat([batch['texture'].cpu(), retrieved_texture]).numpy(), closest_samples, output_dir / "val_vis" / f"{batch_idx:04d}.jpg")
-                total_loss_regression += self.mse_loss(retrieved_texture.to(self.device), batch['texture']).cpu().item()
-                total_loss_contrastive += self.nt_xent_loss(features_in.to(self.device), features_tgt).cpu().item()
-        total_loss_regression /= len(ds_vis)
-        total_loss_contrastive /= len(ds_vis)
-        self.log("val/loss_regression", total_loss_regression, on_step=False, on_epoch=True, prog_bar=False, logger=True)
-        self.log("val/loss_contrastive", total_loss_contrastive, on_step=False, on_epoch=True, prog_bar=False, logger=True)
+            (output_dir / "val_vis").mkdir(exist_ok=True)
+            ds_vis = dataset('val_vis')
+            loader = torch.utils.data.DataLoader(ds_vis, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, drop_last=False, pin_memory=True)
+            total_loss_regression = 0
+            total_loss_contrastive = 0
+            with torch.no_grad():
+                candidate_codes = ds_vis.get_all_texture_patch_codes(self.fenc_target, self.device, self.hparams.batch_size)
+                for batch_idx, batch in enumerate(loader):
+                    ds_vis.move_batch_to_gpu(batch, self.device)
+                    ds_vis.apply_batch_transforms(batch)
+                    features_in_unnormed, features_in_attn = self.fenc_input.forward_with_attention(batch['partial_texture'], batch['mask_missing'])
+                    features_in = torch.nn.functional.normalize(features_in_unnormed, dim=1).cpu()
+                    features_tgt = torch.nn.functional.normalize(self.fenc_target(ds_vis.unfold(batch['texture'])), dim=1)
+                    features_candidates = candidate_codes.unsqueeze(0).expand(features_in.shape[0], -1, -1)
+                    selections = torch.argmax(torch.einsum('ik,ijk->ij', features_in, features_candidates), dim=1)
+                    retrieved_texture = ds_vis.get_patches_with_indices(selections)
+                    retrieved_texture = TextureMapDataset.apply_mask_texture(self.fold(retrieved_texture), batch['mask_texture'].cpu())
+                    closest_samples = self.create_closest_textures_list(batch['name'])
+                    ds_train.visualize_texture_batch(batch['partial_texture'].cpu().numpy(), torch.cat([batch['texture'].cpu(), retrieved_texture]).numpy(), features_in_attn.cpu().numpy() if features_in_attn is not None else None, closest_samples, output_dir / "val_vis" / f"{batch_idx:04d}.jpg")
+                    total_loss_regression += self.mse_loss(retrieved_texture.to(self.device), batch['texture']).cpu().item()
+                    total_loss_contrastive += self.nt_xent_loss(features_in.to(self.device), features_tgt).cpu().item()
+            total_loss_regression /= len(ds_vis)
+            total_loss_contrastive /= len(ds_vis)
+            self.log("val/loss_regression", total_loss_regression, on_step=False, on_epoch=True, prog_bar=False, logger=True)
+            self.log("val/loss_contrastive", total_loss_contrastive, on_step=False, on_epoch=True, prog_bar=False, logger=True)
 
-        loader = torch.utils.data.DataLoader(ds_train, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, drop_last=False, pin_memory=True)
-        batch = next(iter(loader))
-        ds_train.move_batch_to_gpu(batch, self.device)
-        with torch.no_grad():
-            retrieved_texture, _, _ = self.step(batch, use_argmax=True)
-        closest_samples = self.create_closest_textures_list(batch['name'])
-        ds_train.visualize_texture_batch(torch.cat([batch['texture'], retrieved_texture]).cpu().numpy(), closest_samples, output_dir / "train_batch.jpg")
+            loader = torch.utils.data.DataLoader(ds_train, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, drop_last=False, pin_memory=True)
+            batch = next(iter(loader))
+            ds_train.move_batch_to_gpu(batch, self.device)
+            with torch.no_grad():
+                retrieved_texture, _, _, features_in_attn = self.step(batch, use_argmax=True)
+            closest_samples = self.create_closest_textures_list(batch['name'])
+            ds_train.visualize_texture_batch(batch['partial_texture'].cpu().numpy(), torch.cat([batch['texture'], retrieved_texture]).cpu().numpy(), features_in_attn.cpu().numpy() if features_in_attn is not None else None, closest_samples, output_dir / "train_batch.jpg")
 
-    def on_post_move_to_device(self):
+    def on_train_start(self):
         self.feature_loss_helper.move_to_device(self.device)
 
     def create_closest_textures_list(self, names):
@@ -188,7 +192,7 @@ def main(config):
     logger = WandbLogger(project=f'End2End{config.suffix}[{ds_name}]', name=config.experiment, id=config.experiment)
     checkpoint_callback = ModelCheckpoint(dirpath=(Path("runs") / config.experiment), filename='_ckpt_{epoch}', save_top_k=-1, verbose=False, period=config.save_epoch)
     model = TextureEnd2EndModule(config)
-    trainer = Trainer(gpus=[0], num_sanity_val_steps=config.sanity_steps, max_epochs=config.max_epoch, limit_val_batches=config.val_check_percent, callbacks=[checkpoint_callback],
+    trainer = Trainer(gpus=-1, accelerator='ddp', plugins=DDPPlugin(find_unused_parameters=False), num_sanity_val_steps=config.sanity_steps, max_epochs=config.max_epoch, limit_val_batches=config.val_check_percent, callbacks=[checkpoint_callback],
                       val_check_interval=float(min(config.val_check_interval, 1)), check_val_every_n_epoch=max(1, config.val_check_interval), resume_from_checkpoint=config.resume, logger=logger, benchmark=True)
     trainer.fit(model)
 

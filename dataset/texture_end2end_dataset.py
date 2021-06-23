@@ -34,14 +34,16 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
             for index in tqdm(range(len(self.items)), desc='preload_texmap_data'):
                 if self.items[index] not in preload_dict:
                     texture, mask_texture = self.load_view_independent_data_from_disk(self.items[index])
-                    partial_texture_list = []
+                    partial_texture_list, missing_mask_list = [], []
                     for view_index in range(self.views_per_shape):
-                        partial_texture = self.load_view_dependent_data_from_disk(self.items[index], view_index)
+                        partial_texture, missing_mask = self.load_view_dependent_data_from_disk(self.items[index], view_index)
                         partial_texture_list.append(partial_texture)
+                        missing_mask_list.append(missing_mask)
                     self.preload_dict[self.items[index]] = {
                         'texture': texture,
                         'mask_texture': mask_texture,
                         'partial_texture': partial_texture_list,
+                        'missing_mask': missing_mask_list
                     }
         if config.dataset.splits_dir.startswith('overfit'):
             multiplier = 240 if split == 'train' else 2
@@ -59,10 +61,15 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         return np.ascontiguousarray(np.transpose(texture, (2, 0, 1))), mask_texture[np.newaxis, :, :]
 
     def load_view_dependent_data_from_disk(self, item, view_index):
+        missing_mask_path = self.path_to_dataset / item / f"inv_partial_texture_{view_index:03d}.png"
         partial_texture_path = self.path_to_dataset / item / f"inv_partial_texture_{view_index:03d}.png"
+        with Image.open(missing_mask_path) as mask_im:
+            mask_im.thumbnail((self.texture_map_size, self.texture_map_size))
+            missing_mask = np.array(mask_im)[:, :, 0] == 0
+            missing_mask = missing_mask[np.newaxis, :, :].astype(np.float32)
         with Image.open(partial_texture_path) as partial_tex:
             partial_texture = self.from_rgb(TextureMapDataset.process_to_padded_thumbnail(partial_tex, self.texture_map_size)).astype(np.float32)
-        return np.ascontiguousarray(np.transpose(partial_texture, (2, 0, 1)))
+        return np.ascontiguousarray(np.transpose(partial_texture, (2, 0, 1))), missing_mask
 
     def add_database_to_batch(self, num_database_textures, batch, device, remove_true_textures):
         assert self.preload
@@ -86,7 +93,7 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
 
     @staticmethod
     def move_batch_to_gpu(batch, device):
-        move_keys = ['texture', 'partial_texture', 'mask_texture']
+        move_keys = ['texture', 'partial_texture', 'mask_texture', 'mask_missing']
         if 'database_textures' in batch:
             move_keys.append('database_textures')
         move_batch_to_gpu(batch, device, move_keys)
@@ -99,13 +106,15 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         item = self.items[index // self.views_per_shape]
         if self.preload:
             texture, mask_texture, partial_texture = self.preload_dict[item]['texture'], self.preload_dict[item]['mask_texture'], self.preload_dict[item]['partial_texture'][view_index]
+            missing_mask = self.preload_dict[item]['missing_mask'][view_index]
         else:
             texture, mask_texture = self.load_view_independent_data_from_disk(item)
-            partial_texture = self.load_view_dependent_data_from_disk(item, view_index)
+            partial_texture, missing_mask = self.load_view_dependent_data_from_disk(item, view_index)
         return {
             'name': f'{item}',
             'view_index': view_index,
             'texture': texture,
+            'mask_missing': missing_mask,
             'mask_texture': mask_texture.astype(np.float32),
             'partial_texture': partial_texture
         }
@@ -133,20 +142,27 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         plt.show()
         plt.close()
 
-    def visualize_texture_batch(self, texture_batch, closest_batch, outpath):
+    def visualize_texture_batch(self, input_batch, texture_batch, features_in_attn, closest_batch, outpath):
         import matplotlib.pyplot as plt
+        input_batch = input_batch.copy()
         texture_batch = texture_batch.copy()
+        input_batch = [self.denormalize_and_rgb(np.transpose(input_batch[i, :, :, :], (1, 2, 0))) for i in range(input_batch.shape[0])]
         texture_batch_items_row_0 = [self.denormalize_and_rgb(np.transpose(texture_batch[i, :, :, :], (1, 2, 0))) for i in range(texture_batch.shape[0] // 2)]
         texture_batch_items_row_1 = [self.denormalize_and_rgb(np.transpose(texture_batch[i, :, :, :], (1, 2, 0))) for i in range(texture_batch.shape[0]//2, texture_batch.shape[0])]
-        f, axarr = plt.subplots(2 + (1 if closest_batch[0] is not None else 0), len(texture_batch_items_row_0), figsize=(4 * len(texture_batch_items_row_0), 8 + (4 if closest_batch[0] is not None else 0)))
+        f, axarr = plt.subplots(3 + (1 if features_in_attn is not None else 0) + (1 if closest_batch[0] is not None else 0), len(texture_batch_items_row_0), figsize=(4 * len(texture_batch_items_row_0), 16 + (4 if features_in_attn is not None else 0) + (4 if closest_batch[0] is not None else 0)))
         for i in range(len(texture_batch_items_row_0)):
-            axarr[0, i].imshow(texture_batch_items_row_0[i])
+            axarr[0, i].imshow(input_batch[i])
             axarr[0, i].axis('off')
-            axarr[1, i].imshow(texture_batch_items_row_1[i])
+            axarr[1, i].imshow(texture_batch_items_row_0[i])
             axarr[1, i].axis('off')
+            axarr[2, i].imshow(texture_batch_items_row_1[i])
+            axarr[2, i].axis('off')
+            if features_in_attn is not None:
+                axarr[3, i].imshow(features_in_attn[i])
+                axarr[3, i].axis('off')
             if closest_batch[0] is not None:
-                axarr[2, i].imshow(closest_batch[i])
-                axarr[2, i].axis('off')
+                axarr[4, i].imshow(closest_batch[i])
+                axarr[4, i].axis('off')
         plt.tight_layout()
         plt.savefig(outpath, bbox_inches='tight', dpi=240)
         plt.close()
@@ -197,3 +213,27 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
             patch = self.preload_dict[self.train_items[texture_index]]['texture'][:, row * self.unfold.patch_extent: (row + 1) * self.unfold.patch_extent, col * self.unfold.patch_extent: (col + 1) * self.unfold.patch_extent].copy()
             patches[i, :] = normalize_tensor_color(torch.from_numpy(patch).unsqueeze(0), self.color_space).squeeze(0)
         return patches
+
+    @staticmethod
+    def complete_partial_naive(partial_texture, mask_partial):
+        patch_size = 24
+        original_partial_texture = torch.from_numpy(partial_texture.copy())
+        mask_partial = torch.from_numpy(mask_partial.copy()).float().unsqueeze(0).unsqueeze(0)
+        valid_area = TextureMapDataset.get_valid_sampling_area(mask_partial, patch_size)
+        samples = torch.where(valid_area[0, 0, :, :])
+        partial_texture = torch.from_numpy(partial_texture.copy()).unsqueeze(0)
+        indices = list(range(samples[0].shape[0]))
+        random.shuffle(indices)
+
+        for k in indices:
+            sampled_generated = original_partial_texture[:, samples[0][k]: samples[0][k] + patch_size, samples[1][k]: samples[1][k] + patch_size]
+            conv_out = torch.nn.functional.conv2d(mask_partial, torch.ones((1, mask_partial.shape[1], patch_size, patch_size)), stride=1)
+            min_val = torch.min(conv_out).item()
+            argmin = torch.argmin(conv_out, keepdim=True).item()
+            dim_h = argmin // conv_out.shape[3]
+            dim_w = argmin % conv_out.shape[3]
+            if min_val >= (patch_size * patch_size) * 0.9:
+                break
+            partial_texture[0, :, dim_h: dim_h + patch_size, dim_w: dim_w + patch_size] = sampled_generated
+            mask_partial[0, :, dim_h: dim_h + patch_size, dim_w: dim_w + patch_size] = 1
+        return partial_texture[0].numpy()
