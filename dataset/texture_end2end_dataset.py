@@ -61,7 +61,7 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         return np.ascontiguousarray(np.transpose(texture, (2, 0, 1))), mask_texture[np.newaxis, :, :]
 
     def load_view_dependent_data_from_disk(self, item, view_index):
-        missing_mask_path = self.path_to_dataset / item / f"inv_partial_texture_{view_index:03d}.png"
+        missing_mask_path = self.path_to_dataset / item / f"inv_partial_mask_{view_index:03d}.png"
         partial_texture_path = self.path_to_dataset / item / f"inv_partial_texture_{view_index:03d}.png"
         with Image.open(missing_mask_path) as mask_im:
             mask_im.thumbnail((self.texture_map_size, self.texture_map_size))
@@ -142,14 +142,18 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         plt.show()
         plt.close()
 
-    def visualize_texture_batch(self, input_batch, texture_batch, features_in_attn, closest_batch, outpath):
+    def visualize_texture_batch(self, input_batch, texture_batch, source_retrieval_batch, features_in_attn, closest_batch, outpath):
         import matplotlib.pyplot as plt
         input_batch = input_batch.copy()
         texture_batch = texture_batch.copy()
+
         input_batch = [self.denormalize_and_rgb(np.transpose(input_batch[i, :, :, :], (1, 2, 0))) for i in range(input_batch.shape[0])]
         texture_batch_items_row_0 = [self.denormalize_and_rgb(np.transpose(texture_batch[i, :, :, :], (1, 2, 0))) for i in range(texture_batch.shape[0] // 2)]
         texture_batch_items_row_1 = [self.denormalize_and_rgb(np.transpose(texture_batch[i, :, :, :], (1, 2, 0))) for i in range(texture_batch.shape[0]//2, texture_batch.shape[0])]
-        f, axarr = plt.subplots(3 + (1 if features_in_attn is not None else 0) + (1 if closest_batch[0] is not None else 0), len(texture_batch_items_row_0), figsize=(4 * len(texture_batch_items_row_0), 16 + (4 if features_in_attn is not None else 0) + (4 if closest_batch[0] is not None else 0)))
+        if source_retrieval_batch is not None:
+            source_retrieval_batch = source_retrieval_batch.copy()
+            source_retrieval_batch = [self.denormalize_and_rgb(np.transpose(source_retrieval_batch[i, :, :, :], (1, 2, 0))) for i in range(source_retrieval_batch.shape[0])]
+        f, axarr = plt.subplots(3 + (1 if source_retrieval_batch is not None else 0) + (1 if features_in_attn is not None else 0) + (1 if closest_batch[0] is not None else 0), len(texture_batch_items_row_0), figsize=(4 * len(texture_batch_items_row_0), 16 + (4 if source_retrieval_batch is not None else 0) + (4 if features_in_attn is not None else 0) + (4 if closest_batch[0] is not None else 0)))
         for i in range(len(texture_batch_items_row_0)):
             axarr[0, i].imshow(input_batch[i])
             axarr[0, i].axis('off')
@@ -157,12 +161,18 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
             axarr[1, i].axis('off')
             axarr[2, i].imshow(texture_batch_items_row_1[i])
             axarr[2, i].axis('off')
+            j = 3
+            if source_retrieval_batch is not None:
+                axarr[j, i].imshow(source_retrieval_batch[i])
+                axarr[j, i].axis('off')
+                j += 1
             if features_in_attn is not None:
-                axarr[3, i].imshow(features_in_attn[i])
-                axarr[3, i].axis('off')
+                axarr[j, i].imshow(features_in_attn[i])
+                axarr[j, i].axis('off')
+                j += 1
             if closest_batch[0] is not None:
-                axarr[4, i].imshow(closest_batch[i])
-                axarr[4, i].axis('off')
+                axarr[j, i].imshow(closest_batch[i])
+                axarr[j, i].axis('off')
         plt.tight_layout()
         plt.savefig(outpath, bbox_inches='tight', dpi=240)
         plt.close()
@@ -199,6 +209,14 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
             batch['database_textures'] = self.unfold(batch['database_textures'])
             apply_batch_color_transform_and_normalization(batch, ['database_textures'], [], self.color_space)
             codes.append(torch.nn.functional.normalize(fenc_target(batch['database_textures']), dim=1).cpu())
+        return torch.cat(codes, dim=0)
+
+    @staticmethod
+    def get_texture_patch_codes(fenc_target, device, data, num_patch_x2):
+        codes = []
+        for i in range(data.shape[0]):
+            batch = data[i, :, :, :, :].to(device)
+            codes.append(torch.nn.functional.normalize(fenc_target(batch), dim=1).expand(num_patch_x2, -1, -1).cpu())
         return torch.cat(codes, dim=0)
 
     def get_patches_with_indices(self, selections):

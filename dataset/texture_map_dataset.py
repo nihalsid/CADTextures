@@ -244,15 +244,22 @@ class TextureMapDataset(Dataset):
     def sample_patches(mask, patch_size, num_patches, *tensors):
         valid_area = TextureMapDataset.get_valid_sampling_area(mask, patch_size)
         batch_size = tensors[0].shape[0]
-        all_samples = [[] for _ in range(len(tensors))]
+        all_samples = [[[] for _0 in range(batch_size)] for _1 in range(len(tensors))]
         for b in range(batch_size):
             samples = torch.where(valid_area[b, 0, :, :])
             for tid in range(len(tensors)):
-                indices = random.sample(list(range(samples[0].shape[0])), num_patches)
+                if num_patches == -1:
+                    indices = list(range(samples[0].shape[0]))
+                else:
+                    indices = random.sample(list(range(samples[0].shape[0])), num_patches)
                 for k in indices:
                     sampled_generated = tensors[tid][b: b + 1, :, samples[0][k]: samples[0][k] + patch_size, samples[1][k]: samples[1][k] + patch_size]
-                    all_samples[tid].append(sampled_generated)
-        return [torch.cat(all_samples[tid], dim=0) for tid in range(len(tensors))]
+                    all_samples[tid][b].append(sampled_generated.cpu())
+        for tid in range(len(tensors)):
+            common_num_patches = min([len(all_samples[tid][b]) for b in range(batch_size)])
+            for b in range(batch_size):
+                all_samples[tid][b] = all_samples[tid][b][:common_num_patches]
+        return [torch.cat([torch.cat(all_samples[tid][b], dim=0).unsqueeze(0) for b in range(batch_size)], dim=0) for tid in range(len(tensors))]
 
     def sample_patches_for_ptexture(self, partial_texture_name, patch_size, num_textures):
         fold2d = Fold2D(self.texture_map_size // patch_size, patch_size, 3)

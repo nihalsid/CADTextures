@@ -13,7 +13,7 @@ dictionary:
   flann_num_workers: 0
   batch_size: 8
   num_workers: 0
-  extractor: none
+  extractor: self_attention
 
 experiment: fast_dev
 seed: null

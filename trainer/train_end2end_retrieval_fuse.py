@@ -133,11 +133,20 @@ class TextureEnd2EndModule(pl.LightningModule):
                     features_in = torch.nn.functional.normalize(features_in_unnormed, dim=1).cpu()
                     features_tgt = torch.nn.functional.normalize(self.fenc_target(ds_vis.unfold(batch['texture'])), dim=1)
                     features_candidates = candidate_codes.unsqueeze(0).expand(features_in.shape[0], -1, -1)
+
+                    num_patches_x = self.hparams.dataset.texture_map_size // self.hparams.dictionary.patch_size
+                    source_candidates = TextureMapDataset.sample_patches(1 - batch['mask_missing'], self.hparams.dictionary.patch_size, -1, batch['partial_texture'])[0]
+                    features_source_candidates = TextureEnd2EndDataset.get_texture_patch_codes(self.fenc_target, self.device, source_candidates, num_patches_x * num_patches_x)
+                    selections_source = torch.argmax(torch.einsum('ik,ijk->ij', features_in, features_source_candidates), dim=1)
+                    source_candidates = source_candidates.unsqueeze(1).expand(-1, num_patches_x ** 2, -1, -1, -1, -1).reshape(-1, source_candidates.shape[1], source_candidates.shape[2], source_candidates.shape[3], source_candidates.shape[4])
+                    retrieved_source_texture = self.fold(source_candidates[list(range(source_candidates.shape[0])), selections_source, :, :, :])
+                    retrieved_source_texture = TextureMapDataset.apply_mask_texture(retrieved_source_texture, batch['mask_texture'].cpu())
+
                     selections = torch.argmax(torch.einsum('ik,ijk->ij', features_in, features_candidates), dim=1)
                     retrieved_texture = ds_vis.get_patches_with_indices(selections)
                     retrieved_texture = TextureMapDataset.apply_mask_texture(self.fold(retrieved_texture), batch['mask_texture'].cpu())
                     closest_samples = self.create_closest_textures_list(batch['name'])
-                    ds_train.visualize_texture_batch(batch['partial_texture'].cpu().numpy(), torch.cat([batch['texture'].cpu(), retrieved_texture]).numpy(), features_in_attn.cpu().numpy() if features_in_attn is not None else None, closest_samples, output_dir / "val_vis" / f"{batch_idx:04d}.jpg")
+                    ds_train.visualize_texture_batch(batch['partial_texture'].cpu().numpy(), torch.cat([batch['texture'].cpu(), retrieved_texture]).numpy(), retrieved_source_texture.numpy(), features_in_attn.cpu().numpy() if features_in_attn is not None else None, closest_samples, output_dir / "val_vis" / f"{batch_idx:04d}.jpg")
                     total_loss_regression += self.mse_loss(retrieved_texture.to(self.device), batch['texture']).cpu().item()
                     total_loss_contrastive += self.nt_xent_loss(features_in.to(self.device), features_tgt).cpu().item()
             total_loss_regression /= len(ds_vis)
@@ -151,7 +160,7 @@ class TextureEnd2EndModule(pl.LightningModule):
             with torch.no_grad():
                 retrieved_texture, _, _, features_in_attn = self.step(batch, use_argmax=True)
             closest_samples = self.create_closest_textures_list(batch['name'])
-            ds_train.visualize_texture_batch(batch['partial_texture'].cpu().numpy(), torch.cat([batch['texture'], retrieved_texture]).cpu().numpy(), features_in_attn.cpu().numpy() if features_in_attn is not None else None, closest_samples, output_dir / "train_batch.jpg")
+            ds_train.visualize_texture_batch(batch['partial_texture'].cpu().numpy(), torch.cat([batch['texture'], retrieved_texture]).cpu().numpy(), None, features_in_attn.cpu().numpy() if features_in_attn is not None else None, closest_samples, output_dir / "train_batch.jpg")
 
     def on_train_start(self):
         self.feature_loss_helper.move_to_device(self.device)
