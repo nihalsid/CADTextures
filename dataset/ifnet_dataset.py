@@ -63,7 +63,7 @@ class ImplicitDataset(Dataset):
         return np.ascontiguousarray(np.transpose(partial_texture, (2, 0, 1))), missing_mask
 
     def __len__(self):
-        return len(self.items)
+        return len(self.items) * self.views_per_shape
 
     def __getitem__(self, index):
         view_index = index % self.views_per_shape
@@ -104,7 +104,7 @@ class ImplicitDataset(Dataset):
         gt = [(x.copy() + 0.5) * mask[idx, 0, :, :][:, :, np.newaxis] for idx, x in enumerate(gt)]
         pred = [(x.copy() + 0.5) * mask[idx, 0, :, :][:, :, np.newaxis] for idx, x in enumerate(pred)]
         f, axarr = plt.subplots(2, len(gt), figsize=(4 * len(gt), 8))
-        for i in range(2):
+        for i in range(len(gt)):
             axarr[0, i].imshow(gt[i])
             axarr[0, i].axis('off')
             axarr[1, i].imshow(pred[i])

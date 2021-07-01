@@ -1,7 +1,7 @@
 # @package _group_
 name: 'SingleShape/CubeTextures'
 preload: True
-views_per_shape: 1
+views_per_shape: 12
 data_dir: 'data'
 splits_dir: 'overfit_032'
 texture_map_size: 128

@@ -1,7 +1,7 @@
 # @package _group_
 name: 'SingleShape/CubeTextures'
 preload: False
-views_per_shape: 1
+views_per_shape: 12
 data_dir: 'data'
 splits_dir: 'official'
 texture_map_size: 128
