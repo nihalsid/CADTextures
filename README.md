@@ -11,7 +11,11 @@ Check out `requirements.txt` for dependencies. Additionally, you'll need [PyMarc
 Download the data
 
 ```bash
-
+cd data/
+wget "https://www.dropbox.com/s/neua57fnhf99k7v/single_shape_dataset.zip?dl=0" -O dataset.zip
+unzip dataset.zip
+rm dataset.zip
+cd ..
 ```
 
 Make sure that the data exists in `data/` folder.
@@ -21,10 +25,10 @@ Run the following command for an overfitting example on the checked in data:
 # make sure current directory is in python path
 export PYTHONPATH=.
 # run training script
-python trainer/train_end2end_retrieval_fuse.py sanity_steps=1 dataset=single_cube_textures_overfit_32 dataset.preload=True dictionary.patch_size=16 experiment=test_overfitting wandb_main=True val_check_interval=5 save_epoch=5 warmup_epochs_constrastive=10
+python trainer/train_end2end_retrieval_fuse.py sanity_steps=1 dataset=single_cube_textures_overfit_32 dataset.preload=True dictionary.patch_size=16 experiment=test_overfitting wandb_main=False val_check_interval=5 save_epoch=5 warmup_epochs_constrastive=10
 ```
 
-For generalization use `dataset=single_cube_textures`, `val_check_interval=30`, `save_epoch=30`, `warmup_epochs_constrastive=120`.
+For generalization use `dataset=single_cube_textures`, `val_check_interval=30`, `save_epoch=30`, `wandb_main=True` `warmup_epochs_constrastive=120`.
 
 Logs are uploaded to [weights and biases](https://wandb.ai/), so you may need to be signed in there.
 
