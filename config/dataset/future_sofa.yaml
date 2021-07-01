@@ -4,7 +4,7 @@ preload: False
 views_per_shape: 24
 data_dir: 'data'
 splits_dir: 'official'
-texture_map_size: 384
+texture_map_size: 128
 render_size: 256
 mesh_dir: '3D-FUTURE-model/Sofa'
 color_space: lab

@@ -9,8 +9,8 @@ sdf_gen_cmd = lambda dataset, model_id: f"python data_processing/sdf_gen/process
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument('--dataset', default='3D-FUTURE/Sofa', type=str)
-    parser.add_argument('--blender', default='', type=str)
+    parser.add_argument('--dataset', default='SingleShape/CubeDice', type=str)
+    parser.add_argument('--blender', default='/home/nihalsid/Downloads/blender/blender', type=str)
     parser.add_argument('--num_proc', default=1, type=int)
     parser.add_argument('--proc', default=0, type=int)
     args = parser.parse_args()

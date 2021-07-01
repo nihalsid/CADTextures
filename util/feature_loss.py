@@ -5,6 +5,7 @@ import torch
 class FeatureLossHelper:
 
     def __init__(self, layers_content, layers_style):
+        super().__init__()
         model_vgg19 = vgg19(pretrained=True)
         model_vgg19.eval()
         self.layers_content = layers_content

@@ -1,6 +1,7 @@
 data/*
 !data/splits
 wandb/
+lightning_logs/
 runs/
 runs
 *.pyd

@@ -158,7 +158,7 @@ class TextureMapPredictorModule(pl.LightningModule):
         items = [loss_regression_l, loss_regression_ab, loss_content, loss_style]
         for i in range(4):
             items[i] = (items[i] - items[i].min()) / (items[i].max() - items[i].min())
-            axarr[4 + i].imshow(items[i], cmap='jet')
+            axarr[4 + i].imshow(1 - items[i], cmap='RdYlGn')
             axarr[4 + i].axis('off')
         closest_plotted = False
         closest_train = Path(self.hparams.dataset.data_dir) / 'splits' / self.hparams.dataset.name / 'closest_train.json'

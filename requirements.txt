@@ -36,3 +36,4 @@ visdom
 wandb
 argparse
 typing
+yaml
