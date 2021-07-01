@@ -1,0 +1,28 @@
+defaults:
+  - dataset: single_cube_textures_overfit_to_one
+
+dataset:
+  views_per_shape: 12
+
+experiment: fast_dev
+seed: null
+wandb_main: False
+suffix: ''
+save_epoch: 15
+sanity_steps: 0
+max_epoch: 5000
+val_check_percent: 1.0
+val_check_interval: 15
+resume: null
+
+batch_size: 8
+num_workers: 8
+lr: 0.0001
+num_samples: 25000
+
+
+hydra:
+  output_subdir: null # Disable saving of config files. We'll do that ourselves.
+  run:
+    dir: .
+

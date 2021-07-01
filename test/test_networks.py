@@ -2,6 +2,7 @@ import torch
 
 from model.attention import AttentionFeatureEncoder, AttentionBlock, PatchedAttentionBlock
 from model.discriminator import TextureGANDiscriminator
+from model.ifnet import TEXR
 from model.refinement import MainModelInput, MainModelRetrieval, RefinementAttentionTextureGAN
 from model.retrieval import Patch16, Patch16Thin, Patch16MLP, FullTexture, SelfAttentionEncoder16, MaxMixingEncoder16
 from model.texture_gan import ResidualBlock, Scribbler, ImageFusionScribblerSlim, ImageAnd3dFusionScribbler, ScribblerGenerator, ScribblerSlim, TextureGAN, TextureGANSlim
@@ -180,5 +181,13 @@ def test_mix_net_16():
     print_model_parameter_count(model)
 
 
+def test_ifnet():
+    model = TEXR()
+    inputs = torch.randn(2, 4, 128, 128)
+    p = torch.randn(2, 50000, 2)
+    print(model(p, inputs).shape)
+    print_model_parameter_count(model)
+
+
 if __name__ == "__main__":
-    test_mix_net_16()
+    test_ifnet()
