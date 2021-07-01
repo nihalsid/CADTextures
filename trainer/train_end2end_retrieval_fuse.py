@@ -105,7 +105,7 @@ class TextureEnd2EndModule(pl.LightningModule):
         self.log("learning_rate", self.current_learning_rate, on_step=True, on_epoch=False, prog_bar=False, logger=True)
         loss_regression = self.mse_loss(retrieved_texture.detach(), batch['texture'])
         self.log("train/loss_regression", loss_regression, on_step=True, on_epoch=True, prog_bar=False, logger=True)
-        self.log("train/loss_contrastive", loss_ntxent, on_step=True, on_epoch=True, prog_bar=False, logger=True)
+        self.log("train/loss_contrastive", self.start_contrastive_weight * loss_ntxent, on_step=True, on_epoch=True, prog_bar=False, logger=True)
         self.log("train/contrastive_weight", self.current_contrastive_weight, on_step=False, on_epoch=True, prog_bar=False, logger=True)
         return {'loss': loss_total}
 
