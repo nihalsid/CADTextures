@@ -1,10 +1,10 @@
 #!/bin/bash
 
-#SBATCH --job-name texture_e2e
+#SBATCH --job-name texture_ifnet
 ##SBATCH --nodes=1
 ##SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=80gb
+#SBATCH --mem=96gb
 #SBATCH --gpus=2
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=yawar.siddiqui@tum.de
@@ -15,4 +15,4 @@
 
 cd /rhome/ysiddiqui/CADTextures/
 
-python trainer/train_end2end_retrieval_fuse.py sanity_steps=1 dataset=single_cube_textures dataset.preload=True dictionary.patch_size=$RPATCHSIZE experiment=$REXPERIMENT wandb_main=True val_check_interval=$RVALCHECK save_epoch=$RVALCHECK warmup_epochs_constrastive=$RWARMUP
+python trainer/train_ifnet.py sanity_steps=1 dataset=single_cube_textures dataset.preload=False experiment=$REXPERIMENT wandb_main=True val_check_interval=$RVALCHECK save_epoch=$RVALCHECK
