@@ -1,7 +1,9 @@
 from torch import nn
 import torch
+
+from model.fold import Unfold2D
 from model.texture_gan import ResidualBlock, UpsamplingBlock
-from model.attention import PatchedAttentionBlock, AttentionBlock, Unfold2D, Fold2D
+from model.attention import PatchedAttentionBlock, AttentionBlock
 
 
 class MainModelInput(nn.Module):

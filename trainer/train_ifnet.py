@@ -10,7 +10,6 @@ from pytorch_lightning.utilities import rank_zero_only
 import numpy as np
 
 from dataset.ifnet_dataset import ImplicitDataset
-from dataset.texture_map_dataset import TextureMapDataset
 from model.ifnet import TEXR
 
 

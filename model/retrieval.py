@@ -1,17 +1,8 @@
 from torch import nn
 import torch
 
-
-class Unfold2D(nn.Module):
-
-    def __init__(self, patch_extent, nf):
-        super().__init__()
-        self.patch_extent = patch_extent
-        self.nf = nf
-
-    def forward(self, x):
-        unfold_out = x.unfold(2, self.patch_extent, self.patch_extent).unfold(3, self.patch_extent, self.patch_extent)
-        return unfold_out.permute((0, 2, 3, 1, 4, 5)).reshape((-1, self.nf, self.patch_extent, self.patch_extent))
+from model.fold import Unfold2D
+from model.resnet import ResNetSelfAttention, BasicBlock, ResNet
 
 
 class Double3x3Conv2d(nn.Module):
@@ -281,6 +272,29 @@ class MaxMixingEncoder16(nn.Module):
 
     def forward(self, x, mask_missing):
         return self.forward_with_attention(x, mask_missing)[0]
+
+
+class ResNet18SelfAttention(nn.Module):
+
+    def __init__(self, z_dim):
+        super().__init__()
+        self.model = ResNetSelfAttention(BasicBlock, [2, 2, 2, 2], z_dim=z_dim)
+
+    def forward_with_attention(self, x, mask_missing):
+        return self.model(x, mask_missing)
+
+    def forward(self, x, mask_missing):
+        return self.model(x, mask_missing)[0]
+
+
+class ResNet18(nn.Module):
+
+    def __init__(self, z_dim):
+        super().__init__()
+        self.model = ResNet(BasicBlock, [2, 2, 2, 2], z_dim=z_dim)
+
+    def forward(self, x):
+        return self.model(x)
 
 
 def get_input_feature_extractor(config):
