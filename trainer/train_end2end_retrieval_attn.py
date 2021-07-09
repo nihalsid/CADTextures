@@ -252,7 +252,7 @@ class TextureEnd2EndModule(pl.LightningModule):
                 refinement, s, b = self.attention_blending_decode(batch['mask_texture'], features_in_prefc.to(self.device), knn_candidate_features_prefc.to(self.device))
 
                 ds_vis.visualize_texture_batch_01(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), knn_textures.cpu().numpy(), np.zeros_like(refinement.cpu().numpy()), np.zeros_like(refinement.cpu().numpy()), refinement.cpu().numpy(),
-                                                  (s / 2 + 0.5).cpu().numpy(), (s / 2 + 0.5).cpu().numpy(), lambda prefix: output_dir / "val_vis" / f"{prefix}_{batch_idx:04d}.jpg")
+                                                  s.cpu().numpy(), s.cpu().numpy(), lambda prefix: output_dir / "val_vis" / f"{prefix}_{batch_idx:04d}.jpg")
                 total_loss_ret_regression += self.mse_loss(knn_textures[:, 0, :, :, :].to(self.device), batch['texture']).cpu().item()
                 total_loss_ref_regression += self.mse_loss(refinement.to(self.device), batch['texture']).cpu().item()
                 total_loss_contrastive += self.nt_xent_loss(features_in.to(self.device), features_tgt).cpu().item()
