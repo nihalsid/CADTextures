@@ -8,6 +8,8 @@ Check out `requirements.txt` for dependencies. Additionally, you'll need [PyMarc
 
 ### Basic Example
 
+Tested on commit `7e61fc854fed1386d3d27910aa19e70535024701`
+
 Download the data
 
 ```bash
