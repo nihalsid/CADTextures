@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 from PIL import Image
 import os
+import numpy as np
 
 from pytorch_lightning.plugins import DDPPlugin
 from pytorch_lightning.utilities import rank_zero_only
@@ -41,22 +42,16 @@ class TextureEnd2EndModule(pl.LightningModule):
         self.dataset = lambda split: TextureEnd2EndDataset(config, split, self.preload_dict)
         self.train_dataset = self.dataset('train')
         self.fold = Fold2D(config.dataset.texture_map_size // config.dictionary.patch_size, config.dictionary.patch_size, 3)
-        self.fold_features = Fold2D(config.dataset.texture_map_size // config.dictionary.patch_size, 1, self.prefc_features)
+        self.fold_features = Fold2D(config.dataset.texture_map_size // config.dictionary.patch_size, 1, self.prefc_features * 2)
         self.fold_s = Fold2D(config.dataset.texture_map_size // config.dictionary.patch_size, 1, config.dictionary.K)
-        self.fold_b = Fold2D(config.dataset.texture_map_size // config.dictionary.patch_size, 1, 1)
-        self.max = torch.nn.MaxPool1d(kernel_size=config.dictionary.K)
-        self.init_scale = 14
-        self.init_shift = -5
-        self.sig_scale = torch.nn.Parameter(torch.ones(1) * self.init_scale)
-        self.sig_shift = torch.nn.Parameter(torch.ones(1) * self.init_shift)
-        self.sigmoid = torch.nn.Sigmoid()
-        self.decoder = Decoder8x8([self.prefc_features, 192, 128, 64, 32, 16, 3], get_norm(config.norm))
+        self.decoder = Decoder8x8([self.prefc_features * 2, 384, 160, 64, 32, 16, 3], get_norm(config.norm))
+        self.attention = torch.nn.MultiheadAttention(embed_dim=384, num_heads=1, batch_first=True)
         self.current_phase = config.current_phase
 
     def on_train_epoch_start(self):
         if self.current_epoch in self.hparams.phase_epochs and self.current_phase == self.hparams.phase_epochs.index(self.current_epoch):
             self.current_phase += 1
-        self.current_contrastive_weight = self.start_contrastive_weight * max(0, self.hparams.warmup_epochs_constrastive - (self.current_epoch - self.hparams.phase_epochs[0])) / self.hparams.warmup_epochs_constrastive
+        self.current_contrastive_weight = self.start_contrastive_weight * max(0, self.hparams.warmup_epochs_constrastive - self.current_epoch) / self.hparams.warmup_epochs_constrastive
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(list(self.fenc_input.parameters()) + list(self.fenc_target.parameters()), lr=self.hparams.lr)
@@ -82,14 +77,6 @@ class TextureEnd2EndModule(pl.LightningModule):
     def val_dataloader(self):
         dataset = self.dataset('train')
         return torch.utils.data.DataLoader(dataset, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, drop_last=False, pin_memory=True)
-
-    def forward_in(self, batch):
-        _, features_in_prefc = self.fenc_input(batch['partial_texture'], batch['mask_missing'])
-        return TextureMapDataset.apply_mask_texture(self.decoder(self.fold_features(features_in_prefc.unsqueeze(-1).unsqueeze(-1))), batch['mask_texture'])
-
-    def forward_tgt(self, batch):
-        _, features_tgt_prefc = self.fenc_target(self.train_dataset.unfold(batch['texture']))
-        return TextureMapDataset.apply_mask_texture(self.fold(self.decoder(features_tgt_prefc.unsqueeze(-1).unsqueeze(-1))), batch['mask_texture'])
 
     def get_features(self, batch, _use_argmax=False):
         features_in, features_in_prefc = self.fenc_input(batch['partial_texture'], batch['mask_missing'])
@@ -150,42 +137,22 @@ class TextureEnd2EndModule(pl.LightningModule):
         knn_candidate_features_prefc = torch.cat(knn_candidate_features_prefc, 1)
         knn_candidate_features_normed = torch.cat(knn_candidate_features_normed, 1)
 
-        refinement, s, b = self.attention_blending_decode(batch['mask_texture'], features_in_normed, features_in_prefc, knn_candidate_features_normed, knn_candidate_features_prefc, False)
+        refinement, s, b = self.attention_blending_decode(batch['mask_texture'], features_in_prefc, knn_candidate_features_prefc)
         return retrieval, refinement, features_in_normed, features_tgt_normed, s, b
 
-    def attention_blending_decode(self, mask_texture, features_in_normed, features_in_prefc, knn_candidate_features_normed, knn_candidate_features_prefc, use_argmax):
-        s = torch.einsum('ik,ijk->ij', features_in_normed, knn_candidate_features_normed)
-        if use_argmax:
-            knn_features = torch.einsum('ij,ijk->ik', torch.nn.functional.one_hot(s.argmax(dim=1), num_classes=s.shape[1]).float().to(self.device), knn_candidate_features_prefc)
-        else:
-            w = torch.nn.functional.gumbel_softmax(s * 25, tau=1, hard=True)
-            knn_features = torch.einsum('ij,ijk->ik', w, knn_candidate_features_prefc)
-        b = self.sigmoid(self.max(s.unsqueeze(1)).view(s.shape[0], 1) * self.sig_scale + self.sig_shift)
-        o = self.fold_features((knn_features * b + features_in_prefc * (1 - b)).view(knn_features.shape[0], knn_features.shape[1], 1, 1))
+    def attention_blending_decode(self, mask_texture, features_in_prefc, knn_candidate_features_prefc):
+        attn_output, attn_weights = self.attention(features_in_prefc.unsqueeze(1), knn_candidate_features_prefc, knn_candidate_features_prefc)
+        attn_output, attn_weights = attn_output.squeeze(1), attn_weights.squeeze(1)
+        o = self.fold_features(torch.cat([features_in_prefc, attn_output], 1).view(attn_output.shape[0], features_in_prefc.shape[1] + attn_output.shape[1], 1, 1))
         refinement = TextureMapDataset.apply_mask_texture(self.decoder(o), mask_texture)
-        return refinement, self.fold_s(s.unsqueeze(-1).unsqueeze(-1)), self.fold_b(b.unsqueeze(-1).unsqueeze(-1))
+        return refinement, self.fold_s(attn_weights.unsqueeze(-1).unsqueeze(-1)), self.fold_s(attn_weights.unsqueeze(-1).unsqueeze(-1))
 
     def training_step(self, batch, batch_idx):
         self.train_dataset.add_database_to_batch(self.hparams.batch_size * self.hparams.dataset.num_database_textures, batch, self.device, self.hparams.dictionary.patch_size == 128)
         self.train_dataset.apply_batch_transforms(batch)
         gt_texture_l, gt_texture_ab = TextureMapPredictorModule.split_into_channels(batch['texture'])
         loss_total = torch.zeros([1, ], device=self.device)
-        if self.current_phase == 0 or self.current_phase == 1:  # decoding
-            decoded_input = self.forward_in(batch)
-            decoded_target = self.forward_tgt(batch)
-            decoded_input_l, decoded_input_ab = TextureMapPredictorModule.split_into_channels(decoded_input)
-            decoded_target_l, decoded_target_ab = TextureMapPredictorModule.split_into_channels(decoded_target)
-            loss_regression_in_l = self.regression_loss.calculate_loss(gt_texture_l, decoded_input_l).mean()
-            loss_regression_in_ab = self.regression_loss.calculate_loss(gt_texture_ab, decoded_input_ab).mean()
-            loss_regression_tgt_l = self.regression_loss.calculate_loss(gt_texture_l, decoded_target_l).mean()
-            loss_regression_tgt_ab = self.regression_loss.calculate_loss(gt_texture_ab, decoded_target_ab).mean()
-            loss_total = loss_total + (loss_regression_in_l * self.hparams.lambda_regr_l + loss_regression_in_ab * self.hparams.lambda_regr_ab) * 1 + \
-                         (loss_regression_tgt_l * self.hparams.lambda_regr_l + loss_regression_tgt_ab * self.hparams.lambda_regr_ab) * 1
-            self.log("train/loss_regression_in_l", loss_regression_in_l * self.hparams.lambda_regr_l, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
-            self.log("train/loss_regression_in_ab", loss_regression_in_ab * self.hparams.lambda_regr_ab, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
-            self.log("train/loss_regression_tgt_l", loss_regression_tgt_l * self.hparams.lambda_regr_l, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
-            self.log("train/loss_regression_tgt_ab", loss_regression_tgt_ab * self.hparams.lambda_regr_ab, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
-        if self.current_phase == 1:  # retrieval
+        if self.current_phase == 0:  # retrieval
             retrieval, features_in, features_tgt = self.forward_retrieval(batch)
             retrieved_texture_l, retrieved_texture_ab = TextureMapPredictorModule.split_into_channels(retrieval)
             loss_regression_ret_l = self.regression_loss.calculate_loss(gt_texture_l, retrieved_texture_l).mean()
@@ -199,7 +166,7 @@ class TextureEnd2EndModule(pl.LightningModule):
             loss_total = loss_total * 0.5 + (
                         loss_regression_ret_l * self.hparams.lambda_regr_l + loss_regression_ret_ab * self.hparams.lambda_regr_ab + loss_content_ret * self.hparams.lambda_content + loss_style_ret * self.hparams.lambda_style) * 1 \
                          + loss_ntxent * self.current_contrastive_weight
-        if self.current_phase == 2:  # refinement
+        if self.current_phase == 1:  # refinement
             retrieval, refinement, _, _, score, blend = self.forward_all(batch)
             retrieved_texture_l, retrieved_texture_ab = TextureMapPredictorModule.split_into_channels(retrieval)
             refined_texture_l, refined_texture_ab = TextureMapPredictorModule.split_into_channels(refinement)
@@ -220,11 +187,10 @@ class TextureEnd2EndModule(pl.LightningModule):
             loss_total = loss_total + \
                          (loss_regression_ret_l * self.hparams.lambda_regr_l + loss_regression_ret_ab * self.hparams.lambda_regr_ab + loss_content_ret * self.hparams.lambda_content + loss_style_ret * self.hparams.lambda_style) * 0.5 + \
                          (loss_regression_ref_l * self.hparams.lambda_regr_l + loss_regression_ref_ab * self.hparams.lambda_regr_ab + loss_content_ref * self.hparams.lambda_content + loss_style_ref * self.hparams.lambda_style / 25)
-        if self.current_phase in [1, 2]:
-            self.log("train/loss_regression_ret_l", loss_regression_ret_l * self.hparams.lambda_regr_l, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
-            self.log("train/loss_regression_ret_ab", loss_regression_ret_ab * self.hparams.lambda_regr_ab, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
-            self.log("train/loss_style_ret", loss_style_ret * self.hparams.lambda_style, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
-            self.log("train/loss_content_ret", loss_content_ret * self.hparams.lambda_content, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
+        self.log("train/loss_regression_ret_l", loss_regression_ret_l * self.hparams.lambda_regr_l, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
+        self.log("train/loss_regression_ret_ab", loss_regression_ret_ab * self.hparams.lambda_regr_ab, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
+        self.log("train/loss_style_ret", loss_style_ret * self.hparams.lambda_style, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
+        self.log("train/loss_content_ret", loss_content_ret * self.hparams.lambda_content, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
         return loss_total
 
     def validation_step(self, batch, batch_idx):
@@ -247,9 +213,6 @@ class TextureEnd2EndModule(pl.LightningModule):
             for batch_idx, batch in enumerate(loader):
                 ds_vis.move_batch_to_gpu(batch, self.device)
                 ds_vis.apply_batch_transforms(batch)
-
-                in_decode = self.forward_in(batch)
-                tgt_decode = self.forward_tgt(batch)
 
                 features_in_unnormed, features_in_prefc = self.fenc_input(batch['partial_texture'], batch['mask_missing'])
                 features_in = torch.nn.functional.normalize(features_in_unnormed, dim=1).cpu()
@@ -284,14 +247,12 @@ class TextureEnd2EndModule(pl.LightningModule):
                 retrieved_features.append(retrieved_source_features.unsqueeze(1))
 
                 knn_candidate_features_prefc = torch.cat(retrieved_features_prefc, 1)
-                knn_candidate_features_normed = torch.cat(retrieved_features, 1)
                 knn_textures = torch.cat(retrieved_textures, 1)
 
-                refinement, s, b = self.attention_blending_decode(batch['mask_texture'], features_in.to(self.device), features_in_prefc.to(self.device), knn_candidate_features_normed.to(self.device),
-                                                                  knn_candidate_features_prefc.to(self.device), True)
+                refinement, s, b = self.attention_blending_decode(batch['mask_texture'], features_in_prefc.to(self.device), knn_candidate_features_prefc.to(self.device))
 
-                ds_vis.visualize_texture_batch_01(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), knn_textures.cpu().numpy(), in_decode.cpu().numpy(), tgt_decode.cpu().numpy(), refinement.cpu().numpy(),
-                                                  (s / 2 + 0.5).cpu().numpy(), ((s / 2 + 0.5) * b).cpu().numpy(), lambda prefix: output_dir / "val_vis" / f"{prefix}_{batch_idx:04d}.jpg")
+                ds_vis.visualize_texture_batch_01(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), knn_textures.cpu().numpy(), np.zeros_like(refinement.cpu().numpy()), np.zeros_like(refinement.cpu().numpy()), refinement.cpu().numpy(),
+                                                  (s / 2 + 0.5).cpu().numpy(), (s / 2 + 0.5).cpu().numpy(), lambda prefix: output_dir / "val_vis" / f"{prefix}_{batch_idx:04d}.jpg")
                 total_loss_ret_regression += self.mse_loss(knn_textures[:, 0, :, :, :].to(self.device), batch['texture']).cpu().item()
                 total_loss_ref_regression += self.mse_loss(refinement.to(self.device), batch['texture']).cpu().item()
                 total_loss_contrastive += self.nt_xent_loss(features_in.to(self.device), features_tgt).cpu().item()
@@ -307,7 +268,7 @@ class TextureEnd2EndModule(pl.LightningModule):
         self.feature_loss_helper.move_to_device(self.device)
 
 
-@hydra.main(config_path='../config', config_name='texture_end2end')
+@hydra.main(config_path='../config', config_name='texture_end2end_attn')
 def main(config):
     from datetime import datetime
     from pytorch_lightning import Trainer, seed_everything

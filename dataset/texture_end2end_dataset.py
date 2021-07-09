@@ -7,7 +7,7 @@ from tqdm import tqdm
 import math
 
 from dataset.texture_map_dataset import TextureMapDataset
-from model.attention import Unfold2D, Fold2D
+from model.fold import Unfold2D, Unfold2DWithContext
 from util.misc import read_list, move_batch_to_gpu, apply_batch_color_transform_and_normalization, denormalize_and_rgb, normalize_tensor_color
 
 
@@ -19,6 +19,7 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         self.preload_dict = preload_dict
         self.views_per_shape = 1 if (split == 'val' or split == 'val_vis' or split == 'train_vis' or single_view) else config.dataset.views_per_shape
         self.unfold = Unfold2D(config.dictionary.patch_size, 3)
+        self.context_unfold = Unfold2DWithContext(config.dictionary.patch_size, config.dictionary.patch_size * 2, 3)
         self.texture_map_size = config.dataset.texture_map_size
         self.color_space = config.dataset.color_space
         self.from_rgb, self.to_rgb = TextureMapDataset.convert_cspace(config.dataset.color_space)
@@ -46,7 +47,7 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
                         'missing_mask': missing_mask_list
                     }
         if config.dataset.splits_dir.startswith('overfit'):
-            multiplier = 240 if split == 'train' else 2
+            multiplier = 240 if split == 'train' else (2 if len(self.items) == 1 else 1)
             self.items = self.items * multiplier
             self.train_items = self.train_items * 240
 
@@ -142,7 +143,7 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         plt.show()
         plt.close()
 
-    def visualize_texture_batch(self, input_batch, texture_batch, source_retrieval_batch, features_in_attn, closest_batch, outpath):
+    def visualize_texture_batch_00(self, input_batch, texture_batch, source_retrieval_batch, features_in_attn, closest_batch, outpath):
         import matplotlib.pyplot as plt
         input_batch = input_batch.copy()
         texture_batch = texture_batch.copy()
@@ -177,6 +178,63 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         plt.savefig(outpath, bbox_inches='tight', dpi=240)
         plt.close()
 
+    # batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), knn_textures.cpu().numpy(), refinement, s / 2 + 0.5, (s / 2 + 0.5) * b, output_dir / "val_vis" / f"{batch_idx:04d}.jpg"
+    def visualize_texture_batch_01(self, input_batch, target_batch, knn_batch, in_decode, tgt_decode, refinement_batch, scores, scores_blended, outpath):
+        import matplotlib.pyplot as plt
+        input_batch = input_batch.copy()
+        target_batch = target_batch.copy()
+        knn_batch = knn_batch.copy()
+        in_decode = in_decode.copy()
+        tgt_decode = tgt_decode.copy()
+        refinement_batch = refinement_batch.copy()
+        scores = scores.copy()
+        scores_blended = scores_blended.copy()
+
+        input_batch = [self.denormalize_and_rgb(np.transpose(input_batch[i, :, :, :], (1, 2, 0))) for i in range(input_batch.shape[0])]
+        target_batch = [self.denormalize_and_rgb(np.transpose(target_batch[i, :, :, :], (1, 2, 0))) for i in range(target_batch.shape[0])]
+        refinement_batch = [self.denormalize_and_rgb(np.transpose(refinement_batch[i, :, :, :], (1, 2, 0))) for i in range(refinement_batch.shape[0])]
+        in_decode = [self.denormalize_and_rgb(np.transpose(in_decode[i, :, :, :], (1, 2, 0))) for i in range(in_decode.shape[0])]
+        tgt_decode = [self.denormalize_and_rgb(np.transpose(tgt_decode[i, :, :, :], (1, 2, 0))) for i in range(tgt_decode.shape[0])]
+
+        f, axarr = plt.subplots(7, len(input_batch), figsize=(4 * len(input_batch), 4 * 7))
+        for i in range(len(input_batch)):
+            axarr[0, i].imshow(input_batch[i])
+            axarr[0, i].axis('off')
+            axarr[1, i].imshow(target_batch[i])
+            axarr[1, i].axis('off')
+            axarr[2, i].imshow(self.denormalize_and_rgb(np.transpose(knn_batch[i, 0, :, :, :].copy(), (1, 2, 0))))
+            axarr[2, i].axis('off')
+            axarr[3, i].imshow(self.denormalize_and_rgb(np.transpose(knn_batch[i, knn_batch.shape[1] - 1, :, :, :].copy(), (1, 2, 0))))
+            axarr[3, i].axis('off')
+            axarr[4, i].imshow(in_decode[i])
+            axarr[4, i].axis('off')
+            axarr[5, i].imshow(tgt_decode[i])
+            axarr[5, i].axis('off')
+            axarr[6, i].imshow(refinement_batch[i])
+            axarr[6, i].axis('off')
+        plt.tight_layout()
+        plt.savefig(outpath("out_"), bbox_inches='tight', dpi=60)
+        plt.close()
+
+        f, axarr = plt.subplots(len(input_batch) * 3, knn_batch.shape[1] + 1, figsize=(4 * (knn_batch.shape[1] + 1), 4 * 3 * len(input_batch)))
+        for i in range(len(input_batch)):
+            for j in range(knn_batch.shape[1]):
+                axarr[i * 3, j].imshow(self.denormalize_and_rgb(np.transpose(knn_batch[i, j, :, :, :].copy(), (1, 2, 0))))
+                axarr[i * 3, j].axis('off')
+                axarr[i * 3 + 1, j].imshow(1 - scores[i, j, :, :], cmap='RdYlGn')
+                axarr[i * 3 + 1, j].axis('off')
+                axarr[i * 3 + 2, j].imshow(1 - scores_blended[i, j, :, :], cmap='RdYlGn')
+                axarr[i * 3 + 2, j].axis('off')
+            axarr[i * 3, knn_batch.shape[1]].imshow(target_batch[i])
+            axarr[i * 3, knn_batch.shape[1]].axis('off')
+            axarr[i * 3 + 1, knn_batch.shape[1]].imshow(tgt_decode[i])
+            axarr[i * 3 + 1, knn_batch.shape[1]].axis('off')
+            axarr[i * 3 + 2, knn_batch.shape[1]].imshow(refinement_batch[i])
+            axarr[i * 3 + 2, knn_batch.shape[1]].axis('off')
+        plt.tight_layout()
+        plt.savefig(outpath("atn_"), bbox_inches='tight', dpi=40)
+        plt.close()
+
     def visualize_texture_knn_batch(self, knn_batch, K, outpath):
         import matplotlib.pyplot as plt
         knn_batch = knn_batch.copy()
@@ -192,15 +250,21 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
                 axarr[i, j].imshow(knn_columns[j][i])
                 axarr[i, j].axis('off')
         plt.tight_layout()
-        plt.savefig(outpath, bbox_inches='tight', dpi=240)
+        plt.savefig(outpath, bbox_inches='tight', dpi=60)
         plt.close()
 
     def __len__(self):
         return len(self.items) * self.views_per_shape
 
+    def unfold_with_context(self, texture):
+        pad = (self.context_unfold.patch_context - self.context_unfold.patch_extent) // 2
+        padded_texture = torch.nn.functional.pad(texture, pad=(pad, pad, pad, pad))
+        return self.context_unfold(padded_texture)
+
     def get_all_texture_patch_codes(self, fenc_target, device, num_database_textures):
         assert self.preload
         codes = []
+        feats = []
         for i in range(math.ceil(len(self.train_items) / num_database_textures)):
             batch = dict({'database_textures': []})
             for tex in self.train_items[i * num_database_textures: (i + 1) * num_database_textures]:
@@ -208,16 +272,21 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
             batch['database_textures'] = torch.from_numpy(np.concatenate(batch['database_textures'], axis=0)).to(device)
             batch['database_textures'] = self.unfold(batch['database_textures'])
             apply_batch_color_transform_and_normalization(batch, ['database_textures'], [], self.color_space)
-            codes.append(torch.nn.functional.normalize(fenc_target(batch['database_textures']), dim=1).cpu())
-        return torch.cat(codes, dim=0)
+            code, feat = fenc_target(batch['database_textures'])
+            codes.append(torch.nn.functional.normalize(code, dim=1).cpu())
+            feats.append(feat.cpu())
+        return torch.cat(codes, dim=0), torch.cat(feats, dim=0)
 
     @staticmethod
-    def get_texture_patch_codes(fenc_target, device, data, num_patch_x2):
+    def get_texture_patch_codes(fenc_target, data, num_patch_x2, src_device, tgt_device):
         codes = []
+        feats = []
         for i in range(data.shape[0]):
-            batch = data[i, :, :, :, :].to(device)
-            codes.append(torch.nn.functional.normalize(fenc_target(batch), dim=1).expand(num_patch_x2, -1, -1).cpu())
-        return torch.cat(codes, dim=0)
+            batch = data[i, :, :, :, :].to(src_device)
+            code, feat = fenc_target(batch)
+            codes.append(torch.nn.functional.normalize(code, dim=1).expand(num_patch_x2, -1, -1).to(tgt_device))
+            feats.append(feat.expand(num_patch_x2, -1, -1).to(tgt_device))
+        return torch.cat(codes, dim=0), torch.cat(feats, dim=0)
 
     def get_patches_with_indices(self, selections):
         assert self.preload

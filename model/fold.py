@@ -27,3 +27,16 @@ class Unfold2D(nn.Module):
     def forward(self, x):
         unfold_out = x.unfold(2, self.patch_extent, self.patch_extent).unfold(3, self.patch_extent, self.patch_extent)
         return unfold_out.permute((0, 2, 3, 1, 4, 5)).reshape((-1, self.nf, self.patch_extent, self.patch_extent))
+
+
+class Unfold2DWithContext(nn.Module):
+
+    def __init__(self, patch_extent, patch_context, nf):
+        super().__init__()
+        self.patch_extent = patch_extent
+        self.patch_context = patch_context
+        self.nf = nf
+
+    def forward(self, x):
+        unfold_out = x.unfold(2, self.patch_context, self.patch_extent).unfold(3, self.patch_context, self.patch_extent)
+        return unfold_out.permute((0, 2, 3, 1, 4, 5)).reshape((-1, self.nf, self.patch_context, self.patch_context))

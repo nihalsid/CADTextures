@@ -15,7 +15,7 @@ dictionary:
   extractor: self_attention_resnet18
 
 return_prefc: True
-norm: batch
+norm: group
 
 experiment: fast_dev
 seed: null
@@ -45,7 +45,7 @@ warmup_epochs_constrastive: 25
 fenc_nf: 32
 fenc_zdim: 128
 
-phase_epochs: [50, 75]
+phase_epochs: [25,]
 current_phase: 0
 
 hydra:

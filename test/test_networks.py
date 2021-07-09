@@ -3,7 +3,7 @@ import torch
 from model.attention import AttentionFeatureEncoder, AttentionBlock, PatchedAttentionBlock
 from model.discriminator import TextureGANDiscriminator
 from model.ifnet import TEXR
-from model.refinement import MainModelInput, MainModelRetrieval, RefinementAttentionTextureGAN
+from model.refinement import MainModelInput, MainModelRetrieval, RefinementAttentionTextureGAN, Decoder8x8
 from model.retrieval import Patch16, Patch16Thin, Patch16MLP, FullTexture, SelfAttentionEncoder16, MaxMixingEncoder16, ResNet18SelfAttention, ResNet18
 from model.texture_gan import ResidualBlock, Scribbler, ImageFusionScribblerSlim, ImageAnd3dFusionScribbler, ScribblerGenerator, ScribblerSlim, TextureGAN, TextureGANSlim
 from util.misc import print_model_parameter_count
@@ -173,7 +173,7 @@ def test_self_attention_16():
 
 
 def test_resnet18_self_attention_16():
-    model = ResNet18SelfAttention(128)
+    model = ResNet18SelfAttention(128, False)
     t0 = torch.randn(2, 3, 128, 128)
     t1 = torch.zeros(2, 1, 128, 128)
     t1[:, :, 8:24, 8:24] = 1
@@ -182,8 +182,8 @@ def test_resnet18_self_attention_16():
 
 
 def test_resnet18():
-    model = ResNet18(128)
-    t0 = torch.randn(2, 3, 128, 128)
+    model = ResNet18(128, False)
+    t0 = torch.randn(2, 3, 16, 16)
     print(model(t0).shape)
     print_model_parameter_count(model)
 
@@ -202,6 +202,13 @@ def test_ifnet():
     inputs = torch.randn(2, 4, 128, 128)
     p = torch.randn(2, 50000, 2)
     print(model(p, inputs).shape)
+    print_model_parameter_count(model)
+
+
+def test_decoder_8():
+    model = Decoder8x8([384, 128, 64, 32, 3], torch.nn.BatchNorm2d)
+    inputs = torch.randn(2, 384, 8, 8)
+    print(model(inputs).shape)
     print_model_parameter_count(model)
 
 

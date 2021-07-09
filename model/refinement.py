@@ -1,9 +1,54 @@
 from torch import nn
 import torch
 
-from model.fold import Unfold2D
+from model.fold import Unfold2D, Fold2D
 from model.texture_gan import ResidualBlock, UpsamplingBlock
 from model.attention import PatchedAttentionBlock, AttentionBlock
+
+
+class Decoder8x8(nn.Module):
+
+    def __init__(self, channels, norm):
+
+        super().__init__()
+        # noinspection PyTypeChecker
+        self.model = nn.Sequential(
+            UpsamplingBlock(channels[0], channels[1], 3, 1, 1),
+            norm(channels[1]),
+            nn.ReLU(True),
+            nn.Conv2d(channels[1], channels[1], 3, 1, 1),
+            norm(channels[1]),
+            nn.ReLU(True),
+
+            UpsamplingBlock(channels[1], channels[2], 3, 1, 1),
+            norm(channels[2]),
+            nn.ReLU(True),
+            nn.Conv2d(channels[2], channels[2], 3, 1, 1),
+            norm(channels[2]),
+            nn.ReLU(True),
+
+            UpsamplingBlock(channels[2], channels[3], 3, 1, 1),
+            norm(channels[3]),
+            nn.ReLU(True),
+            nn.Conv2d(channels[3], channels[3], 3, 1, 1),
+            norm(channels[3]),
+            nn.ReLU(True),
+
+            UpsamplingBlock(channels[3], channels[4], 3, 1, 1),
+            norm(channels[4]),
+            nn.ReLU(True),
+            nn.Conv2d(channels[4], channels[5], 3, 1, 1),
+            norm(channels[5]),
+            nn.ReLU(True),
+            nn.Conv2d(channels[5], channels[5], 3, 1, 1),
+            norm(channels[5]),
+            nn.ReLU(True),
+            nn.Conv2d(channels[5], channels[6], 3, 1, 1),
+        )
+        self.tanh = nn.Tanh()
+
+    def forward(self, x):
+        return self.tanh(self.model(x)) * 0.5
 
 
 class MainModelInput(nn.Module):

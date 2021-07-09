@@ -166,16 +166,16 @@ class Patch16MLP(nn.Module):
             nn.ReLU(),
             nn.Linear(nf * 8, nf * 16),
             nn.ReLU(),
-            nn.Linear(nf * 16, nf * 8),
+            nn.Linear(nf * 16, 384),
             nn.ReLU(),
-            nn.Linear(nf * 8, z_dim),
         ])
+        self.out_layer = nn.Linear(384, z_dim)
 
     def forward(self, x):
         x = x.reshape([x.shape[0], -1])
         for f in self.layers:
             x = f(x)
-        return x
+        return self.out_layer(x), x
 
 
 class SelfAttentionEncoder16(nn.Module):
@@ -201,11 +201,11 @@ class SelfAttentionEncoder16(nn.Module):
         self.attention = nn.MultiheadAttention(embed_dim=nf * 4, num_heads=1, batch_first=True)
         # noinspection PyTypeChecker
         self.post_attention = nn.Sequential(
-            nn.Conv2d(nf * 8, nf * 8, kernel_size=5, stride=1, padding=2),
+            nn.Conv2d(nf * 8, 384, kernel_size=5, stride=1, padding=2),
             nn.LeakyReLU(0.2, inplace=True)
         )
-        self.unfold = Unfold2D(1, nf * 8)
-        self.final_layer = nn.Linear(8 * nf, z_dim)
+        self.unfold = Unfold2D(1, 384)
+        self.final_layer = nn.Linear(384, z_dim)
 
     @staticmethod
     def view_as_image(x):
@@ -225,10 +225,10 @@ class SelfAttentionEncoder16(nn.Module):
         attn_output = self.view_as_image(attn_output)
         post_attn = self.post_attention(torch.cat((volume, attn_output), 1))
         unfolded = self.unfold(post_attn).squeeze(-1).squeeze(-1)
-        return self.final_layer(unfolded), attn_weights
+        return self.final_layer(unfolded), unfolded, attn_weights
 
     def forward(self, x, mask_missing):
-        return self.forward_with_attention(x, mask_missing)[0]
+        return self.forward_with_attention(x, mask_missing)[:2]
 
 
 class MaxMixingEncoder16(nn.Module):
@@ -276,29 +276,37 @@ class MaxMixingEncoder16(nn.Module):
 
 class ResNet18SelfAttention(nn.Module):
 
-    def __init__(self, z_dim):
+    def __init__(self, z_dim, return_prefc, norm):
         super().__init__()
-        self.model = ResNetSelfAttention(BasicBlock, [2, 2, 2, 2], z_dim=z_dim)
-
-    def forward_with_attention(self, x, mask_missing):
-        return self.model(x, mask_missing)
+        self.model = ResNetSelfAttention(BasicBlock, [2, 2, 2, 2], z_dim=z_dim, return_prefc=return_prefc, norm_layer=norm)
 
     def forward(self, x, mask_missing):
-        return self.model(x, mask_missing)[0]
+        return self.model(x, mask_missing)
 
 
 class ResNet18(nn.Module):
 
-    def __init__(self, z_dim):
+    def __init__(self, z_dim, return_prefc, norm):
         super().__init__()
-        self.model = ResNet(BasicBlock, [2, 2, 2, 2], z_dim=z_dim)
+        self.model = ResNet(BasicBlock, [2, 2, 2, 2], z_dim=z_dim, return_prefc=return_prefc, norm_layer=norm)
 
     def forward(self, x):
         return self.model(x)
 
 
+def get_norm(norm):
+    if norm == "batch":
+        return lambda n: nn.BatchNorm2d(n)
+    if norm == "group":
+        return lambda n: nn.GroupNorm(16, n)
+    if norm == "none":
+        return lambda n: nn.Identity()
+
+
 def get_input_feature_extractor(config):
     if config.dictionary.patch_size == 16:
+        if config.dictionary.extractor == "self_attention_resnet18":
+            return ResNet18SelfAttention(config.fenc_zdim, config.return_prefc, get_norm(config.norm))
         if config.dictionary.extractor == "self_attention":
             return SelfAttentionEncoder16(config.fenc_nf, config.fenc_zdim)
         if config.dictionary.extractor == "max_mixing":
@@ -314,7 +322,10 @@ def get_input_feature_extractor(config):
 
 def get_target_feature_extractor(config):
     if config.dictionary.patch_size == 16:
-        return Patch16MLP(config.fenc_nf, config.fenc_zdim)
+        if config.dictionary.extractor == "self_attention_resnet18":
+            return ResNet18(config.fenc_zdim, config.return_prefc, get_norm(config.norm))
+        else:
+            return Patch16MLP(config.fenc_nf, config.fenc_zdim)
     elif config.dictionary.patch_size == 128:
         return FullTexture(config.fenc_nf, config.fenc_zdim)
     raise NotImplementedError

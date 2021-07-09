@@ -6,7 +6,7 @@ from torch.utils.data.dataset import Dataset
 from tqdm import tqdm
 from pathlib import Path
 
-from model.attention import Fold2D
+from model.fold import Fold2D
 from util.misc import read_list, move_batch_to_gpu, apply_batch_color_transform_and_normalization, normalize_tensor_color
 import numpy as np
 from colorspacious import cspace_convert
@@ -251,7 +251,7 @@ class TextureMapDataset(Dataset):
                 if num_patches == -1:
                     indices = list(range(samples[0].shape[0]))
                 else:
-                    indices = random.sample(list(range(samples[0].shape[0])), num_patches)
+                    indices = random.sample(list(range(samples[0].shape[0])), min(num_patches, samples[0].shape[0]))
                 for k in indices:
                     sampled_generated = tensors[tid][b: b + 1, :, samples[0][k]: samples[0][k] + patch_size, samples[1][k]: samples[1][k] + patch_size]
                     all_samples[tid][b].append(sampled_generated.cpu())

@@ -16,12 +16,14 @@ class ResNetSelfAttention(nn.Module):
         layers: List[int],
         z_dim: int = 128,
         zero_init_residual: bool = False,
+        return_prefc: bool = False,
         groups: int = 1,
         width_per_group: int = 64,
         replace_stride_with_dilation: Optional[List[bool]] = None,
         norm_layer: Optional[Callable[..., nn.Module]] = None
     ) -> None:
         super().__init__()
+        self.return_prefc = return_prefc
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         self._norm_layer = norm_layer
@@ -31,7 +33,7 @@ class ResNetSelfAttention(nn.Module):
         if replace_stride_with_dilation is None:
             # each element in the tuple indicates if we should replace
             # the 2x2 stride with a dilated convolution instead
-            replace_stride_with_dilation = [True, False, False]
+            replace_stride_with_dilation = [False, True, False]
         if len(replace_stride_with_dilation) != 3:
             raise ValueError("replace_stride_with_dilation should be None "
                              "or a 3-element tuple, got {}".format(replace_stride_with_dilation))
@@ -43,15 +45,15 @@ class ResNetSelfAttention(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 64, layers[0])
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=1,
+        self.layer2 = self._make_layer(block, 128, layers[1], stride=2,
                                        dilate=replace_stride_with_dilation[0])
-        self.layer3 = self._make_layer(block, 256, layers[2], stride=2,
+        self.layer3 = self._make_layer(block, 192, layers[2], stride=1,
                                        dilate=replace_stride_with_dilation[1])
         self.layer4 = self._make_layer(block, 256, layers[3], stride=2,
                                        dilate=replace_stride_with_dilation[2])
         self.post_attention = nn.Sequential(
-            nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1),
-            norm_layer(512),
+            nn.Conv2d(512, 384, kernel_size=3, stride=1, padding=1),
+            norm_layer(384),
             nn.ReLU(inplace=True)
         )
         self.backbone_mask = nn.Sequential(
@@ -63,8 +65,8 @@ class ResNetSelfAttention(nn.Module):
 
         self.attention = nn.MultiheadAttention(embed_dim=256, num_heads=1, batch_first=True)
 
-        self.unfold = Unfold2D(1, 512 * block.expansion)
-        self.final_layer = nn.Linear(512 * block.expansion, z_dim)
+        self.unfold = Unfold2D(1, 384 * block.expansion)
+        self.final_layer = nn.Linear(384 * block.expansion, z_dim)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -107,7 +109,7 @@ class ResNetSelfAttention(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def _forward_impl(self, x: Tensor, mask_missing: Tensor) -> Tuple[Any, Any]:
+    def _forward_impl(self, x: Tensor, mask_missing: Tensor) -> Tuple[Any, Any, Any]:
         # See note [TorchScript super()]
         x = self.conv1(x)
         x = self.bn1(x)
@@ -125,10 +127,12 @@ class ResNetSelfAttention(nn.Module):
         attn_output = self.view_as_image(attn_output)
         post_attn = self.post_attention(torch.cat((volume, attn_output), 1))
         unfolded = self.unfold(post_attn).squeeze(-1).squeeze(-1)
-        return self.final_layer(unfolded), attn_weights
+        return self.final_layer(unfolded), unfolded, attn_weights
 
-    def forward(self, x: Tensor, mask_missing: Tensor) -> Tuple[Any, Any]:
-        return self._forward_impl(x, mask_missing)
+    def forward(self, x: Tensor, mask_missing: Tensor) -> Tuple[Any, Any, Any]:
+        if self.return_prefc:
+            return self._forward_impl(x, mask_missing)[:2]
+        return self._forward_impl(x, mask_missing)[:1]
 
     @staticmethod
     def view_as_image(x):
@@ -149,12 +153,14 @@ class ResNet(nn.Module):
         layers: List[int],
         z_dim: int = 128,
         zero_init_residual: bool = False,
+        return_prefc: bool = False,
         groups: int = 1,
         width_per_group: int = 64,
         replace_stride_with_dilation: Optional[List[bool]] = None,
         norm_layer: Optional[Callable[..., nn.Module]] = None
     ) -> None:
         super(ResNet, self).__init__()
+        self.return_prefc = return_prefc
         if norm_layer is None:
             norm_layer = nn.BatchNorm2d
         self._norm_layer = norm_layer
@@ -164,26 +170,24 @@ class ResNet(nn.Module):
         if replace_stride_with_dilation is None:
             # each element in the tuple indicates if we should replace
             # the 2x2 stride with a dilated convolution instead
-            replace_stride_with_dilation = [True, False, False]
+            replace_stride_with_dilation = [False, False, False]
         if len(replace_stride_with_dilation) != 3:
             raise ValueError("replace_stride_with_dilation should be None "
                              "or a 3-element tuple, got {}".format(replace_stride_with_dilation))
         self.groups = groups
         self.base_width = width_per_group
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3,
-                               bias=False)
+        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 64, layers[0])
-        self.layer2 = self._make_layer(block, 128, layers[1], stride=1,
+        self.layer2 = self._make_layer(block, 128, layers[1], stride=2,
                                        dilate=replace_stride_with_dilation[0])
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2,
                                        dilate=replace_stride_with_dilation[1])
-        self.layer4 = self._make_layer(block, 512, layers[3], stride=2,
+        self.layer4 = self._make_layer(block, 384, layers[3], stride=2,
                                        dilate=replace_stride_with_dilation[2])
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512 * block.expansion, z_dim)
+        self.fc = nn.Linear(384 * block.expansion, z_dim)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -226,22 +230,21 @@ class ResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def _forward_impl(self, x: Tensor) -> Tensor:
+    def _forward_impl(self, x: Tensor) -> Tuple[Any, Tensor]:
         # See note [TorchScript super()]
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
-        x = self.maxpool(x)
-
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
         x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
+        x_prefc = torch.flatten(x, 1)
+        x = self.fc(x_prefc)
+        return x, x_prefc
 
-        return x
-
-    def forward(self, x: Tensor) -> Tensor:
-        return self._forward_impl(x)
+    def forward(self, x: Tensor) -> Tuple[Any, Tensor]:
+        if self.return_prefc:
+            return self._forward_impl(x)
+        return self._forward_impl(x)[0]
