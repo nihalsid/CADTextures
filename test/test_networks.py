@@ -1,6 +1,7 @@
 import torch
 
 from model.attention import AttentionFeatureEncoder, AttentionBlock, PatchedAttentionBlock
+from model.diffusion_model import Encoder, Decoder
 from model.discriminator import TextureGANDiscriminator
 from model.ifnet import TEXR
 from model.refinement import MainModelInput, MainModelRetrieval, RefinementAttentionTextureGAN, Decoder8x8
@@ -212,5 +213,19 @@ def test_decoder_8():
     print_model_parameter_count(model)
 
 
+def test_tt_vqgan_encoder():
+    encoder = Encoder(ch=128, out_ch=3, ch_mult=(1, 1, 2, 2, 4), num_res_blocks=2, attn_resolutions=[8], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=128, z_channels=256, double_z=False)
+    t0 = torch.randn(2, 3, 128, 128)
+    print(encoder(t0).shape)
+    print_model_parameter_count(encoder)
+
+
+def test_tt_vqgan_decoder():
+    decoder = Decoder(ch=128, out_ch=3, ch_mult=(1, 1, 2, 2, 4), num_res_blocks=2, attn_resolutions=[8], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=128, z_channels=256, double_z=False)
+    t0 = torch.randn(2, 256, 8, 8)
+    print(decoder(t0).shape)
+    print_model_parameter_count(decoder)
+
+
 if __name__ == "__main__":
-    test_resnet18()
+    test_tt_vqgan_decoder()

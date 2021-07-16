@@ -59,7 +59,7 @@ class TextureEnd2EndModule(pl.LightningModule):
         self.current_contrastive_weight = self.start_contrastive_weight * max(0, self.hparams.warmup_epochs_constrastive - (self.current_epoch - self.hparams.phase_epochs[0])) / self.hparams.warmup_epochs_constrastive
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(list(self.fenc_input.parameters()) + list(self.fenc_target.parameters()), lr=self.hparams.lr)
+        optimizer = torch.optim.Adam(list(self.fenc_input.parameters()) + list(self.fenc_target.parameters()) + list(self.decoder.parameters()), lr=self.hparams.lr)
         scheduler = []
         if self.hparams.scheduler is not None:
             scheduler = [torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=self.hparams.scheduler, gamma=0.5)]

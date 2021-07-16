@@ -3,7 +3,7 @@ name: 'SingleShape/CubeTextures'
 preload: True
 views_per_shape: 12
 data_dir: 'data'
-splits_dir: 'overfit_050'
+splits_dir: 'overfit_004'
 texture_map_size: 128
 render_size: 256
 mesh_dir: 'SingleShape-model/CubeTextures'

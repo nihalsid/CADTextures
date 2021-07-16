@@ -39,11 +39,11 @@ lambda_regr_ab: 10
 lambda_content: 0.00075
 lambda_style: 500
 start_contrastive_weight: 0.01
-regression_loss_type: l2
+regression_loss_type: l1
 warmup_epochs_constrastive: 25
 
 fenc_nf: 32
-fenc_zdim: 128
+fenc_zdim: 256
 
 phase_epochs: [25,]
 current_phase: 0

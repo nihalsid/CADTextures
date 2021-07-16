@@ -47,9 +47,9 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
                         'missing_mask': missing_mask_list
                     }
         if config.dataset.splits_dir.startswith('overfit'):
-            multiplier = 240 if split == 'train' else (2 if len(self.items) == 1 else 1)
+            multiplier = 24 if split == 'train' else (2 if len(self.items) == 1 else 1)
             self.items = self.items * multiplier
-            self.train_items = self.train_items * 240
+            self.train_items = self.train_items * 24
 
     def load_view_independent_data_from_disk(self, item):
         texture_path = self.path_to_dataset / item / "surface_texture.png"
@@ -272,8 +272,8 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
             batch['database_textures'] = torch.from_numpy(np.concatenate(batch['database_textures'], axis=0)).to(device)
             batch['database_textures'] = self.unfold(batch['database_textures'])
             apply_batch_color_transform_and_normalization(batch, ['database_textures'], [], self.color_space)
-            code, feat = fenc_target(batch['database_textures'])
-            codes.append(torch.nn.functional.normalize(code, dim=1).cpu())
+            feat = fenc_target(batch['database_textures'])
+            codes.append(torch.nn.functional.normalize(feat, dim=1).cpu())
             feats.append(feat.cpu())
         return torch.cat(codes, dim=0), torch.cat(feats, dim=0)
 
@@ -283,8 +283,8 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         feats = []
         for i in range(data.shape[0]):
             batch = data[i, :, :, :, :].to(src_device)
-            code, feat = fenc_target(batch)
-            codes.append(torch.nn.functional.normalize(code, dim=1).expand(num_patch_x2, -1, -1).to(tgt_device))
+            feat = fenc_target(batch)
+            codes.append(torch.nn.functional.normalize(feat, dim=1).expand(num_patch_x2, -1, -1).to(tgt_device))
             feats.append(feat.expand(num_patch_x2, -1, -1).to(tgt_device))
         return torch.cat(codes, dim=0), torch.cat(feats, dim=0)
 
