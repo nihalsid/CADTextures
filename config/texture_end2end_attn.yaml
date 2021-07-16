@@ -4,7 +4,7 @@ defaults:
   - model: singlecube_colors
 
 dataset:
-  num_database_textures: 16
+  num_database_textures: 32
 
 dictionary:
   patch_size: 16
@@ -25,11 +25,11 @@ save_epoch: 5
 sanity_steps: 0
 max_epoch: 5000
 val_check_percent: 1.0
-val_check_interval: 5
+val_check_interval: 2
 resume: null
 scheduler: null
 
-batch_size: 6
+batch_size: 2
 num_workers: 8
 lr: 0.0001
 
@@ -40,7 +40,7 @@ lambda_content: 0.00075
 lambda_style: 500
 start_contrastive_weight: 0.01
 regression_loss_type: l1
-warmup_epochs_constrastive: 25
+warmup_epochs_constrastive: 50
 
 fenc_nf: 32
 fenc_zdim: 256
