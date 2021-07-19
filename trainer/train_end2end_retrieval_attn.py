@@ -117,12 +117,20 @@ class TextureEnd2EndModule(pl.LightningModule):
         refinement, s, b = self.attention_blending_decode(batch['mask_texture'], features_in, knn_candidate_features)
         return retrieval, refinement, features_in_normed, features_tgt_normed, s, b
 
-    def attention_blending_decode(self, mask_texture, features_in, knn_candidate_features):
+    def attention_blending_decode(self, mask_texture, features_in, knn_candidate_features, return_debug_vis=False):
         attn_output, attn_weights = self.attention(features_in.unsqueeze(1), knn_candidate_features, knn_candidate_features)
         attn_output, attn_weights = attn_output.squeeze(1), attn_weights.squeeze(1)
-        o = self.fold_features(attn_output.view(attn_output.shape[0], attn_output.shape[1], 1, 1)) + self.fold_features(features_in.view(attn_output.shape[0], attn_output.shape[1], 1, 1))
+        o_0 = self.fold_features(attn_output.view(attn_output.shape[0], attn_output.shape[1], 1, 1))
+        o_1 = self.fold_features(features_in.view(attn_output.shape[0], attn_output.shape[1], 1, 1))
+        o = o_0 + o_1
         refinement = TextureMapDataset.apply_mask_texture(self.decoder(o), mask_texture)
-        return refinement, self.fold_s(attn_weights.unsqueeze(-1).unsqueeze(-1)), self.fold_s(attn_weights.unsqueeze(-1).unsqueeze(-1))
+        if not return_debug_vis:
+            return refinement, self.fold_s(attn_weights.unsqueeze(-1).unsqueeze(-1)), self.fold_s(attn_weights.unsqueeze(-1).unsqueeze(-1))
+        else:
+            refinement = TextureMapDataset.apply_mask_texture(self.decoder(o), mask_texture)
+            refinement_noinp = TextureMapDataset.apply_mask_texture(self.decoder(o_0), mask_texture)
+            refinement_noret = TextureMapDataset.apply_mask_texture(self.decoder(o_1), mask_texture)
+            return refinement, refinement_noret, refinement_noinp, self.fold_s(attn_weights.unsqueeze(-1).unsqueeze(-1)), self.fold_s(attn_weights.unsqueeze(-1).unsqueeze(-1))
 
     def training_step(self, batch, batch_idx):
         self.train_dataset.add_database_to_batch(self.hparams.batch_size * self.hparams.dataset.num_database_textures, batch, self.device, self.hparams.dictionary.patch_size == 128)
@@ -223,9 +231,9 @@ class TextureEnd2EndModule(pl.LightningModule):
                 knn_candidate_features = torch.cat(retrieved_features, 1)
                 knn_textures = torch.cat(retrieved_textures, 1)
 
-                refinement, s, b = self.attention_blending_decode(batch['mask_texture'], features_in.to(self.device), knn_candidate_features.to(self.device))
+                refinement, refinement_noret, refinement_noinp, s, b = self.attention_blending_decode(batch['mask_texture'], features_in.to(self.device), knn_candidate_features.to(self.device), return_debug_vis=True)
 
-                ds_vis.visualize_texture_batch_01(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), knn_textures.cpu().numpy(), np.zeros_like(refinement.cpu().numpy()), np.zeros_like(refinement.cpu().numpy()), refinement.cpu().numpy(),
+                ds_vis.visualize_texture_batch_01(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), knn_textures.cpu().numpy(), refinement_noret.cpu().numpy(), refinement_noinp.cpu().numpy(), refinement.cpu().numpy(),
                                                   s.cpu().numpy(), s.cpu().numpy(), lambda prefix: output_dir / "val_vis" / f"{prefix}_{batch_idx:04d}.jpg")
                 total_loss_ret_regression += self.mse_loss(knn_textures[:, 0, :, :, :].to(self.device), batch['texture']).cpu().item()
                 total_loss_ref_regression += self.mse_loss(refinement.to(self.device), batch['texture']).cpu().item()
