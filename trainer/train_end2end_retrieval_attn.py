@@ -249,6 +249,9 @@ class TextureEnd2EndModule(pl.LightningModule):
     def on_train_start(self):
         self.feature_loss_helper.move_to_device(self.device)
 
+    def on_load_checkpoint(self, checkpoint):
+        checkpoint['optimizer_states'] = self.optimizers().state
+
 
 @hydra.main(config_path='../config', config_name='texture_end2end_attn')
 def main(config):

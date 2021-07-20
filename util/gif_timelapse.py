@@ -31,5 +31,5 @@ def create_run_timelapse(run):
 
 
 if __name__ == "__main__":
-    _run = "/cluster_HDD/gondor/ysiddiqui/CADTextures/runs/16072057_end2end_attnfuse_vqvae_batch"
+    _run = "/media/nihalsid/OSDisk/Users/ga83fiz/nihalsid/CADTextures/runs/20071701_end2end_fast_dev/"
     create_run_timelapse(_run)

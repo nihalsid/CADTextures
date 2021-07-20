@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import random
 from PIL import Image
+from matplotlib.patches import Circle
 from tqdm import tqdm
 import math
 
@@ -178,7 +179,6 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         plt.savefig(outpath, bbox_inches='tight', dpi=240)
         plt.close()
 
-    # batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), knn_textures.cpu().numpy(), refinement, s / 2 + 0.5, (s / 2 + 0.5) * b, output_dir / "val_vis" / f"{batch_idx:04d}.jpg"
     def visualize_texture_batch_01(self, input_batch, target_batch, knn_batch, in_decode, tgt_decode, refinement_batch, scores, scores_blended, outpath):
         import matplotlib.pyplot as plt
         input_batch = input_batch.copy()
@@ -233,6 +233,39 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
             axarr[i * 3 + 2, knn_batch.shape[1]].axis('off')
         plt.tight_layout()
         plt.savefig(outpath("atn_"), bbox_inches='tight', dpi=40)
+        plt.close()
+
+    def visualize_texture_batch_02(self, input_batch, target_batch, refinement_batch, offsets_batch, outpath):
+        import matplotlib.pyplot as plt
+        input_batch = input_batch.copy()
+        refinement_batch = refinement_batch.copy()
+        offsets_batch = offsets_batch.reshape((offsets_batch.shape[0], 2, 3, 3, offsets_batch.shape[-2], offsets_batch.shape[-1])).mean(axis=2).mean(axis=2).copy()
+        ratio_i, ratio_j = refinement_batch.shape[-2] // offsets_batch.shape[-2], refinement_batch.shape[-1] // offsets_batch.shape[-1]
+        pos_i, pos_j = np.meshgrid(list(range(offsets_batch.shape[-2])), list(range(offsets_batch.shape[-1])), indexing='ij') # 8 x 8
+
+        pos_i = [np.clip(((offsets_batch[i, 0, :, :] + pos_i + 0.5) * ratio_i), 0, offsets_batch.shape[-2] * ratio_i).astype(np.int32) for i in range(offsets_batch.shape[0])]
+        pos_j = [np.clip(((offsets_batch[i, 1, :, :] + pos_j + 0.5) * ratio_j), 0, offsets_batch.shape[-1] * ratio_j).astype(np.int32) for i in range(offsets_batch.shape[0])]
+
+        input_batch = [self.denormalize_and_rgb(np.transpose(input_batch[i, :, :, :], (1, 2, 0))) for i in range(input_batch.shape[0])]
+        target_batch = [self.denormalize_and_rgb(np.transpose(target_batch[i, :, :, :], (1, 2, 0))) for i in range(target_batch.shape[0])]
+        refinement_batch = [self.denormalize_and_rgb(np.transpose(refinement_batch[i, :, :, :], (1, 2, 0))) for i in range(refinement_batch.shape[0])]
+
+        f, axarr = plt.subplots(4, len(input_batch), figsize=(4 * len(input_batch), 4 * 4))
+        for i in range(len(input_batch)):
+            axarr[0, i].imshow(input_batch[i])
+            axarr[0, i].axis('off')
+            axarr[1, i].imshow(target_batch[i])
+            axarr[1, i].axis('off')
+            axarr[2, i].imshow(refinement_batch[i])
+            axarr[2, i].axis('off')
+            axarr[3, i].imshow(input_batch[i])
+            axarr[3, i].axis('off')
+            for y in range(pos_i[i].shape[0]):
+                for x in range(pos_i[i].shape[1]):
+                    circ = Circle((pos_j[i][y, x], pos_i[i][y, x]), 3, color='red')
+                    axarr[3, i].add_patch(circ)
+        plt.tight_layout()
+        plt.savefig(outpath("out_"), bbox_inches='tight', dpi=60)
         plt.close()
 
     def visualize_texture_knn_batch(self, knn_batch, K, outpath):
