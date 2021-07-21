@@ -107,6 +107,24 @@ class VectorQuantizer(nn.Module):
 
         return z_q, loss, (perplexity, min_encodings, min_encoding_indices)
 
+    def knn_quants(self, z, K):
+        # reshape z -> (batch, height, width, channel) and flatten
+        z = rearrange(z, 'b c h w -> b h w c').contiguous()
+        z_flattened = z.view(-1, self.e_dim)
+        # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
+
+        d = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
+            torch.sum(self.embedding.weight ** 2, dim=1) - 2 * \
+            torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
+
+        min_encoding_indices = torch.argsort(d, dim=1)[:, :K]
+        quants = []
+        for k in range(K):
+            z_q = self.embedding(min_encoding_indices[:, k]).view(z.shape)
+            z_q = rearrange(z_q, 'b h w c -> b c h w').contiguous()
+            quants.append(z_q)
+        return quants
+
     def get_codebook_entry(self, indices, shape):
         # shape specifying (batch, height, width, channel)
         if self.remap is not None:
@@ -148,6 +166,12 @@ class VQGAN(nn.Module):
         quant, emb_loss, info = self.quantize(h)
         return quant, emb_loss, info
 
+    def knn_codes(self, x, K):
+        h = self.encoder(x)
+        h = self.quant_conv(h)
+        quants = self.quantize.knn_quants(h, K)
+        return quants
+
     def decode(self, quant):
         quant = self.post_quant_conv(quant)
         dec = self.decoder(quant)
@@ -157,3 +181,10 @@ class VQGAN(nn.Module):
         quant, _, _ = self.encode(input)
         dec = self.decode(quant)
         return dec
+
+    def get_knn_reconstructions(self, input, K):
+        quants = self.knn_codes(input, K)
+        decs = []
+        for k in range(K):
+            decs.append(self.decode(quants[k]))
+        return decs
