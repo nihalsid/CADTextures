@@ -345,7 +345,7 @@ class Model(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, *, ch, out_ch, ch_mult=(1,2,4,8), num_res_blocks,
                  attn_resolutions, dropout=0.0, resamp_with_conv=True, in_channels,
-                 resolution, z_channels, double_z=True, **ignore_kwargs):
+                 resolution, z_channels, double_z=True, use_unfold=True, **ignore_kwargs):
         super().__init__()
         self.ch = ch
         self.temb_ch = 0
@@ -353,7 +353,7 @@ class Encoder(nn.Module):
         self.num_res_blocks = num_res_blocks
         self.resolution = resolution
         self.in_channels = in_channels
-
+        self.use_unfold = use_unfold
         # downsampling
         self.conv_in = torch.nn.Conv2d(in_channels,
                                        self.ch,
@@ -433,14 +433,15 @@ class Encoder(nn.Module):
         h = self.norm_out(h)
         h = nonlinearity(h)
         h = self.conv_out(h)
-        unfolded_h = self.unfold(h).squeeze(-1).squeeze(-1)
-        return unfolded_h
+        if self.use_unfold:
+            h = self.unfold(h).squeeze(-1).squeeze(-1)
+        return h
 
 
 class Decoder(nn.Module):
     def __init__(self, *, ch, out_ch, ch_mult=(1,2,4,8), num_res_blocks,
                  attn_resolutions, dropout=0.0, resamp_with_conv=True, in_channels,
-                 resolution, z_channels, give_pre_end=False, **ignorekwargs):
+                 resolution, z_channels, give_pre_end=False, use_tanh=True, **ignorekwargs):
         super().__init__()
         self.ch = ch
         self.temb_ch = 0
@@ -449,6 +450,7 @@ class Decoder(nn.Module):
         self.resolution = resolution
         self.in_channels = in_channels
         self.give_pre_end = give_pre_end
+        self.use_tanh = use_tanh
 
         # compute in_ch_mult, block_in and curr_res at lowest res
         in_ch_mult = (1,)+tuple(ch_mult)
@@ -539,7 +541,10 @@ class Decoder(nn.Module):
         h = self.norm_out(h)
         h = nonlinearity(h)
         h = self.conv_out(h)
-        return self.tanh(h) * 0.5
+        if self.use_tanh:
+            return self.tanh(h) * 0.5
+        else:
+            return h
 
 
 class VUNet(nn.Module):
