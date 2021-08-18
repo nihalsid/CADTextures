@@ -37,7 +37,9 @@ class TextureEnd2EndModule(pl.LightningModule):
         self.dataset = lambda split: TextureEnd2EndDataset(config, split, self.preload_dict)
         self.train_dataset = self.dataset('train')
         self.decoder = Decoder(ch=128, out_ch=3, ch_mult=(1, 1, 2, 2, 4), num_res_blocks=2, attn_resolutions=[8], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=128, z_channels=config.fenc_zdim, double_z=False)
-        self.attention = torch.nn.MultiheadAttention(embed_dim=256, num_heads=1, batch_first=True)
+        self.attention_layers = torch.nn.ModuleList()
+        for _att_i in range(5):
+            self.attention_layers.append(torch.nn.MultiheadAttention(embed_dim=256, num_heads=1, batch_first=True)) 
         self.current_phase = config.current_phase
         self.fold = Fold2D(config.dataset.texture_map_size // config.dictionary.patch_size, config.dictionary.patch_size, 3)
         self.fold_features = Fold2D(config.dataset.texture_map_size // config.dictionary.patch_size, 1, config.fenc_zdim)
@@ -49,7 +51,7 @@ class TextureEnd2EndModule(pl.LightningModule):
         self.current_contrastive_weight = self.start_contrastive_weight * max(0, self.hparams.warmup_epochs_constrastive - self.current_epoch) / self.hparams.warmup_epochs_constrastive
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(list(self.fenc_input.parameters()) + list(self.fenc_target.parameters()) + list(self.attention.parameters()) + list(self.decoder.parameters()), lr=self.hparams.lr, betas=(0.5, 0.9))
+        optimizer = torch.optim.Adam(list(self.fenc_input.parameters()) + list(self.fenc_target.parameters()) + list(self.attention_layers.parameters()) + list(self.decoder.parameters()), lr=self.hparams.lr, betas=(0.5, 0.9))
         scheduler = []
         if self.hparams.scheduler is not None:
             scheduler = [torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=self.hparams.scheduler, gamma=0.5)]
@@ -118,15 +120,22 @@ class TextureEnd2EndModule(pl.LightningModule):
         return retrieval, refinement, features_in_normed, features_tgt_normed, s, b
 
     def attention_blending_decode(self, mask_texture, features_in, knn_candidate_features, return_debug_vis=False):
-        attn_output, attn_weights = self.attention(features_in.unsqueeze(1), knn_candidate_features, knn_candidate_features)
-        attn_output, attn_weights = attn_output.squeeze(1), attn_weights.squeeze(1)
-        o_0 = self.fold_features(attn_output.view(attn_output.shape[0], attn_output.shape[1], 1, 1))
-        o_1 = self.fold_features(features_in.view(attn_output.shape[0], attn_output.shape[1], 1, 1))
-        o = o_0 + o_1
+        cumulative_output = features_in.unsqueeze(1)
+        cumulative_weights = torch.zeros((features_in.shape[0], 1, self.hparams.dictionary.K)).to(features_in.device)
+        for att_i in range(5):
+            attn_output, attn_weights = self.attention_layers[att_i](cumulative_output, knn_candidate_features, knn_candidate_features)
+            cumulative_weights = cumulative_weights + attn_weights
+            cumulative_output = cumulative_output + attn_output
+        cumulative_weights = cumulative_weights / 5
+        cumulative_output, cumulative_weights = cumulative_output.squeeze(1), cumulative_weights.squeeze(1)
+        
+        o = self.fold_features(cumulative_output.view(cumulative_output.shape[0], cumulative_output.shape[1], 1, 1))
         refinement = TextureMapDataset.apply_mask_texture(self.decoder(o), mask_texture)
         if not return_debug_vis:
             return refinement, self.fold_s(attn_weights.unsqueeze(-1).unsqueeze(-1)), self.fold_s(attn_weights.unsqueeze(-1).unsqueeze(-1))
         else:
+            o_0 = self.fold_features(features_in.view(cumulative_output.shape[0], cumulative_output.shape[1], 1, 1))
+            o_1 = o - o_0
             refinement = TextureMapDataset.apply_mask_texture(self.decoder(o), mask_texture)
             refinement_noinp = TextureMapDataset.apply_mask_texture(self.decoder(o_0), mask_texture)
             refinement_noret = TextureMapDataset.apply_mask_texture(self.decoder(o_1), mask_texture)
