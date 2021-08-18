@@ -11,7 +11,7 @@ from pytorch_lightning.utilities import rank_zero_only
 
 from dataset.texture_end2end_dataset import TextureEnd2EndDataset
 from dataset.texture_map_dataset import TextureMapDataset
-from model.diffusion_model import Decoder, DeformableEncoder
+from model.diffusion_model import Decoder, DeformableEncoder, Encoder
 from trainer.train_texture_map_predictor import TextureMapPredictorModule
 from util.feature_loss import FeatureLossHelper
 from util.regression_loss import RegressionLossHelper
@@ -24,7 +24,7 @@ class TextureRegressionModule(pl.LightningModule):
         self.save_hyperparameters(config)
         self.preload_dict = {}
         assert config.dataset.texture_map_size == 128, "only 128x128 texture map supported"
-        encoder = lambda in_channels, z_channels: DeformableEncoder(ch=128, out_ch=3, ch_mult=(1, 1, 2, 2, 4), num_res_blocks=2, attn_resolutions=[8], dropout=0.0, resamp_with_conv=True, in_channels=in_channels, resolution=128, z_channels=z_channels, double_z=False)
+        encoder = lambda in_channels, z_channels: Encoder(ch=128, out_ch=3, ch_mult=(1, 1, 2, 2, 4), num_res_blocks=2, attn_resolutions=[8], dropout=0.0, resamp_with_conv=True, in_channels=in_channels, resolution=128, z_channels=z_channels, use_unfold=False, double_z=False)
         self.fenc_input = encoder(4, config.fenc_zdim)
         self.regression_loss = RegressionLossHelper(self.hparams.regression_loss_type)
         self.feature_loss_helper = FeatureLossHelper(['relu4_2'], ['relu3_2', 'relu4_2'])
@@ -48,15 +48,18 @@ class TextureRegressionModule(pl.LightningModule):
         return torch.utils.data.DataLoader(dataset, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, drop_last=False, pin_memory=True)
 
     def forward(self, batch):
-        features_in, offsets = self.fenc_input(torch.cat([batch['partial_texture'], batch['mask_missing']], 1))
+        # features_in, offsets = self.fenc_input(torch.cat([batch['partial_texture'], batch['mask_missing']], 1))
+        features_in = self.fenc_input(torch.cat([batch['partial_texture'], batch['mask_missing']], 1))
         refinement = TextureMapDataset.apply_mask_texture(self.decoder(features_in), batch['mask_texture'])
-        return refinement, offsets
+        # return refinement, offsets
+        return refinement
 
     def training_step(self, batch, batch_idx):
         self.train_dataset.apply_batch_transforms(batch)
         gt_texture_l, gt_texture_ab = TextureMapPredictorModule.split_into_channels(batch['texture'])
         loss_total = torch.zeros([1, ], device=self.device)
-        refinement, _ = self.forward(batch)
+        # refinement, _ = self.forward(batch)
+        refinement = self.forward(batch)
         refined_texture_l, refined_texture_ab = TextureMapPredictorModule.split_into_channels(refinement)
         loss_regression_ref_l = self.regression_loss.calculate_loss(gt_texture_l, refined_texture_l).mean()
         loss_regression_ref_ab = self.regression_loss.calculate_loss(gt_texture_ab, refined_texture_ab).mean()
@@ -89,8 +92,10 @@ class TextureRegressionModule(pl.LightningModule):
             for batch_idx, batch in enumerate(loader):
                 ds_vis.move_batch_to_gpu(batch, self.device)
                 ds_vis.apply_batch_transforms(batch)
-                refinement, offsets = self.forward(batch)
-                ds_vis.visualize_texture_batch_02(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), refinement.cpu().numpy(), offsets.cpu().numpy(), lambda prefix: output_dir / "val_vis" / f"{prefix}_{batch_idx:04d}.jpg")
+                # refinement, offsets = self.forward(batch)
+                refinement = self.forward(batch)
+                # ds_vis.visualize_texture_batch_02(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), refinement.cpu().numpy(), offsets.cpu().numpy(), lambda prefix: output_dir / "val_vis" / f"{prefix}_{batch_idx:04d}.jpg")
+                ds_vis.visualize_texture_batch_03(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), refinement.cpu().numpy(), lambda prefix: output_dir / "val_vis" / f"{prefix}_{batch_idx:04d}.jpg")
                 total_loss_ref_regression += self.mse_loss(refinement.to(self.device), batch['texture']).cpu().item()
 
         total_loss_ref_regression /= len(ds_vis)
