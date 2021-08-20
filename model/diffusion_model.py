@@ -407,8 +407,7 @@ class Encoder(nn.Module):
         self.unfold = Unfold2D(1, z_channels)
 
     def forward(self, x):
-        #assert x.shape[2] == x.shape[3] == self.resolution, "{}, {}, {}".format(x.shape[2], x.shape[3], self.resolution)
-
+        # assert x.shape[2] == x.shape[3] == self.resolution, "{}, {}, {}".format(x.shape[2], x.shape[3], self.resolution)
         # timestep embedding
         temb = None
 

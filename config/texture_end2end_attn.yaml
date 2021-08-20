@@ -5,6 +5,7 @@ defaults:
 
 dataset:
   num_database_textures: 32
+  precomputed_retrieval_dir: null
 
 dictionary:
   patch_size: 16

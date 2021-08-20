@@ -299,9 +299,10 @@ class TextureEnd2EndModule(pl.LightningModule):
         total_loss_ret_regression /= len(ds_vis)
         total_loss_ref_regression /= len(ds_vis)
         total_loss_contrastive /= len(ds_vis)
-        self.log("val/loss_ret_regression", total_loss_ret_regression, on_step=False, on_epoch=True, prog_bar=False, logger=True)
-        self.log("val/loss_ref_regression", total_loss_ref_regression, on_step=False, on_epoch=True, prog_bar=False, logger=True)
-        self.log("val/loss_contrastive", total_loss_contrastive, on_step=False, on_epoch=True, prog_bar=False, logger=True)
+
+        self.log("val/loss_ret_regression", total_loss_ret_regression, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True)
+        self.log("val/loss_ref_regression", total_loss_ref_regression, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True)
+        self.log("val/loss_contrastive", total_loss_contrastive, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True)
 
     def on_train_start(self):
         self.feature_loss_helper.move_to_device(self.device)
@@ -327,7 +328,7 @@ def main(config):
     # noinspection PyUnusedLocal
     filesystem_logger = FilesystemLogger(config)
     logger = WandbLogger(project=f'End2End{config.suffix}[{ds_name}]', name=config.experiment, id=config.experiment)
-    checkpoint_callback = ModelCheckpoint(dirpath=(Path("runs") / config.experiment), filename='_ckpt_{epoch}', save_top_k=-1, verbose=False, every_n_val_epochs=config.save_epoch)
+    checkpoint_callback = ModelCheckpoint(dirpath=(Path("runs") / config.experiment), filename='_ckpt_{epoch}', save_top_k=-1, verbose=False, every_n_epochs=config.save_epoch)
     model = TextureEnd2EndModule(config)
     trainer = Trainer(gpus=-1, accelerator='ddp', plugins=DDPPlugin(find_unused_parameters=True), num_sanity_val_steps=config.sanity_steps, max_epochs=config.max_epoch, limit_val_batches=config.val_check_percent,
                       callbacks=[checkpoint_callback],

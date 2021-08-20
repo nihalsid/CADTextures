@@ -5,9 +5,12 @@ import pytorch_lightning as pl
 import torch
 from pathlib import Path
 import numpy as np
+import wandb
+from PIL import Image
 
 from pytorch_lightning.plugins import DDPPlugin
 from pytorch_lightning.utilities import rank_zero_only
+from tabulate import tabulate
 
 from dataset.texture_end2end_dataset import TextureEnd2EndDataset
 from dataset.texture_map_dataset import TextureMapDataset
@@ -240,6 +243,10 @@ class TextureEnd2EndModule(pl.LightningModule):
                 knn_candidate_features = torch.cat(retrieved_features, 1)
                 knn_textures = torch.cat(retrieved_textures, 1)
 
+                # for bidx in range(knn_textures.shape[0]):
+                #     for k in range(knn_textures.shape[1]):
+                #         Image.fromarray(ds_vis.denormalize_and_rgb(np.transpose(knn_textures[bidx, k, :, :, :].cpu().numpy().copy(), (1, 2, 0)))).save(f"saved_retrievals/{batch['name'][bidx]}__{batch['view_index'][bidx]:02d}__{k:02d}.jpg")
+
                 refinement, refinement_noret, refinement_noinp, s, b = self.attention_blending_decode(batch['mask_texture'], features_in.to(self.device), knn_candidate_features.to(self.device), return_debug_vis=True)
 
                 ds_vis.visualize_texture_batch_01(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), knn_textures.cpu().numpy(), refinement_noret.cpu().numpy(), refinement_noinp.cpu().numpy(), refinement.cpu().numpy(),
@@ -251,15 +258,19 @@ class TextureEnd2EndModule(pl.LightningModule):
         total_loss_ret_regression /= len(ds_vis)
         total_loss_ref_regression /= len(ds_vis)
         total_loss_contrastive /= len(ds_vis)
-        self.log("val/loss_ret_regression", total_loss_ret_regression, on_step=False, on_epoch=True, prog_bar=False, logger=True)
-        self.log("val/loss_ref_regression", total_loss_ref_regression, on_step=False, on_epoch=True, prog_bar=False, logger=True)
-        self.log("val/loss_contrastive", total_loss_contrastive, on_step=False, on_epoch=True, prog_bar=False, logger=True)
+        self.log("val/loss_ret_regression", total_loss_ret_regression, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True)
+        self.log("val/loss_ref_regression", total_loss_ref_regression, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True)
+        self.log("val/loss_contrastive", total_loss_contrastive, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True)
 
     def on_train_start(self):
         self.feature_loss_helper.move_to_device(self.device)
 
+    def on_validation_start(self):
+        self.feature_loss_helper.move_to_device(self.device)
+
     def on_load_checkpoint(self, checkpoint):
-        checkpoint['optimizer_states'] = self.optimizers().state
+        if self.current_phase == 0:
+            checkpoint['optimizer_states'] = self.optimizers().state
 
 
 @hydra.main(config_path='../config', config_name='texture_end2end_attn')
@@ -281,8 +292,8 @@ def main(config):
     seed_everything(config.seed)
     # noinspection PyUnusedLocal
     filesystem_logger = FilesystemLogger(config)
-    logger = WandbLogger(project=f'End2End{config.suffix}[{ds_name}]', name=config.experiment, id=config.experiment)
-    checkpoint_callback = ModelCheckpoint(dirpath=(Path("runs") / config.experiment), filename='_ckpt_{epoch}', save_top_k=-1, verbose=False, every_n_val_epochs=config.save_epoch)
+    logger = WandbLogger(project=f'End2End{config.suffix}[{ds_name}]', name=config.experiment, id=config.experiment, settings=wandb.Settings(start_method='thread'))
+    checkpoint_callback = ModelCheckpoint(dirpath=(Path("runs") / config.experiment), filename='_ckpt_{epoch}', save_top_k=-1, verbose=False, every_n_epochs=config.save_epoch)
     model = TextureEnd2EndModule(config)
     trainer = Trainer(gpus=-1, accelerator='ddp', plugins=DDPPlugin(find_unused_parameters=True), num_sanity_val_steps=config.sanity_steps, max_epochs=config.max_epoch, limit_val_batches=config.val_check_percent,
                       callbacks=[checkpoint_callback],

@@ -18,6 +18,7 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         super().__init__()
         self.preload = config.dataset.preload
         self.preload_dict = preload_dict
+        self.precomputed_retrieval_dir = config.dataset.precomputed_retrieval_dir
         self.views_per_shape = 1 if (split == 'val' or split == 'val_vis' or split == 'train_vis' or single_view) else config.dataset.views_per_shape
         self.unfold = Unfold2D(config.dictionary.patch_size, 3)
         self.context_unfold = Unfold2DWithContext(config.dictionary.patch_size, config.dictionary.patch_size * 2, 3)
@@ -74,14 +75,20 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         return np.ascontiguousarray(np.transpose(partial_texture, (2, 0, 1))), missing_mask
 
     def add_database_to_batch(self, num_database_textures, batch, device, remove_true_textures):
-        assert self.preload
         database_textures = []
         candidate_names = [x for x in self.train_items if (x not in batch['name'] or not remove_true_textures)]
         database_texture_names = random.sample(candidate_names, min(num_database_textures, len(candidate_names)))
         for tex in database_texture_names:
-            database_textures.append(self.preload_dict[tex]['texture'][np.newaxis, :, :, :])
+            database_textures.append(self.texture_access(tex)[np.newaxis, :, :, :])
         database_textures = torch.from_numpy(np.concatenate(database_textures, axis=0)).to(device)
         batch['database_textures'] = database_textures
+
+    def texture_access(self, tex_name):
+        if self.preload:
+            texture = self.preload_dict[tex_name]['texture']
+        else:
+            texture, _ = self.load_view_independent_data_from_disk(tex_name)
+        return texture
 
     def apply_batch_transforms(self, batch, texture_masking=True):
         normalization_keys = ['texture', 'partial_texture']
@@ -112,14 +119,20 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         else:
             texture, mask_texture = self.load_view_independent_data_from_disk(item)
             partial_texture, missing_mask = self.load_view_dependent_data_from_disk(item, view_index)
-        return {
+        ret_val = {
             'name': f'{item}',
             'view_index': view_index,
             'texture': texture,
             'mask_missing': missing_mask,
             'mask_texture': mask_texture.astype(np.float32),
-            'partial_texture': partial_texture
+            'partial_texture': partial_texture,
         }
+        if self.precomputed_retrieval_dir is not None:
+            with Image.open(Path(self.precomputed_retrieval_dir) / f'{item}__{view_index:02d}__03.jpg') as retrieval_im:
+                retrieval = self.from_rgb(np.array(retrieval_im)).astype(np.float32)
+            retrieval = np.ascontiguousarray(np.transpose(retrieval, (2, 0, 1)))
+            ret_val['database_textures'] = retrieval
+        return ret_val
 
     def visualize_sample_pyplot(self, incomplete, target, mask, database, closest):
         import matplotlib.pyplot as plt
@@ -317,13 +330,12 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         return self.context_unfold(padded_texture)
 
     def get_all_texture_patch_codes(self, fenc_target, device, num_database_textures):
-        assert self.preload
         codes = []
         feats = []
         for i in range(math.ceil(len(self.train_items) / num_database_textures)):
             batch = dict({'database_textures': []})
             for tex in self.train_items[i * num_database_textures: (i + 1) * num_database_textures]:
-                batch['database_textures'].append(self.preload_dict[tex]['texture'][np.newaxis, :, :, :].copy())
+                batch['database_textures'].append(self.texture_access(tex)[np.newaxis, :, :, :].copy())
             batch['database_textures'] = torch.from_numpy(np.concatenate(batch['database_textures'], axis=0)).to(device)
             batch['database_textures'] = self.unfold(batch['database_textures'])
             apply_batch_color_transform_and_normalization(batch, ['database_textures'], [], self.color_space)
@@ -344,7 +356,6 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         return torch.cat(codes, dim=0), torch.cat(feats, dim=0)
 
     def get_patches_with_indices(self, selections):
-        assert self.preload
         num_patch_x = self.texture_map_size // self.unfold.patch_extent
         patches = torch.zeros((selections.shape[0], 3, self.unfold.patch_extent, self.unfold.patch_extent))
         for i in range(selections.shape[0]):
@@ -352,7 +363,7 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
             patch_index = selections[i] % (num_patch_x * num_patch_x)
             row = patch_index // num_patch_x
             col = patch_index % num_patch_x
-            patch = self.preload_dict[self.train_items[texture_index]]['texture'][:, row * self.unfold.patch_extent: (row + 1) * self.unfold.patch_extent, col * self.unfold.patch_extent: (col + 1) * self.unfold.patch_extent].copy()
+            patch = self.texture_access(self.train_items[texture_index])[:, row * self.unfold.patch_extent: (row + 1) * self.unfold.patch_extent, col * self.unfold.patch_extent: (col + 1) * self.unfold.patch_extent].copy()
             patches[i, :] = normalize_tensor_color(torch.from_numpy(patch).unsqueeze(0), self.color_space).squeeze(0)
         return patches
 
