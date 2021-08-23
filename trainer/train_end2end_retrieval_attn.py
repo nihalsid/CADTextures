@@ -140,8 +140,8 @@ class TextureEnd2EndModule(pl.LightningModule):
             o_0 = self.fold_features(features_in.view(cumulative_output.shape[0], cumulative_output.shape[1], 1, 1))
             o_1 = o - o_0
             refinement = TextureMapDataset.apply_mask_texture(self.decoder(o), mask_texture)
-            refinement_noinp = TextureMapDataset.apply_mask_texture(self.decoder(o_0), mask_texture)
-            refinement_noret = TextureMapDataset.apply_mask_texture(self.decoder(o_1), mask_texture)
+            refinement_noret = TextureMapDataset.apply_mask_texture(self.decoder(o_0), mask_texture)
+            refinement_noinp = TextureMapDataset.apply_mask_texture(self.decoder(o_1), mask_texture)
             return refinement, refinement_noret, refinement_noinp, self.fold_s(attn_weights.unsqueeze(-1).unsqueeze(-1)), self.fold_s(attn_weights.unsqueeze(-1).unsqueeze(-1))
 
     def training_step(self, batch, batch_idx):

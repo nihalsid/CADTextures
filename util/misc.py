@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from PIL import Image
+import math
 
 
 def read_list(path):
@@ -96,3 +97,7 @@ def load_net_for_eval(net, ckpt_path, rename_prefix):
     net = net.cuda()
     net.eval()
     return net
+
+
+def cosine_decay(x, max_x, start_val, final_val):
+    return (0.5 + 0.5 * math.cos(math.pi * min(x, max_x) / max_x)) * (start_val - final_val) + final_val

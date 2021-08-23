@@ -1,0 +1,55 @@
+defaults:
+  - dataset: single_cube_textures_overfit_01
+  - inputs: 2d_retrieval_partial_texture
+  - model: singlecube_colors
+
+dataset:
+  num_database_textures: 32
+  precomputed_retrieval_dir: /rhome/ysiddiqui/CADTextures/saved_retrievals
+
+dictionary:
+  patch_size: 16
+  K: 1
+  flann_num_workers: 0
+  batch_size: 8
+  num_workers: 0
+  extractor: self_attention_resnet18
+
+return_prefc: True
+norm: group
+
+experiment: fast_dev
+seed: null
+wandb_main: False
+suffix: ''
+save_epoch: 5
+sanity_steps: 0
+max_epoch: 5000
+val_check_percent: 1.0
+val_check_interval: 2
+resume: null
+scheduler: null
+
+batch_size: 2
+num_workers: 8
+lr: 0.0001
+
+temperature: 0.1
+lambda_regr_l: 20
+lambda_regr_ab: 100
+lambda_content: 0.15
+lambda_style: 5000
+
+regression_loss_type: l1
+
+fenc_nf: 32
+fenc_zdim: 256
+
+phase_epochs: [25,]
+current_phase: 0
+
+hydra:
+  output_subdir: null # Disable saving of config files. We'll do that ourselves.
+  run:
+    dir: .
+
