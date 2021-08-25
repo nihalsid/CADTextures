@@ -4,7 +4,7 @@ import torch
 
 class FeatureLossHelper:
 
-    def __init__(self, layers_content, layers_style):
+    def __init__(self, layers_content, layers_style, mode):
         super().__init__()
         model_vgg19 = vgg19(pretrained=True)
         model_vgg19.eval()
@@ -12,6 +12,14 @@ class FeatureLossHelper:
         self.layers_style = layers_style
         self.feature_extractor = FeatureExtractor(model_vgg19.features, layers_style[-1])
         self.criterion = torch.nn.MSELoss(reduction='none')
+        if mode == 'lll':
+            self.calculate_style_loss = self.calculate_style_loss_lll
+            self.calculate_feature_loss = self.calculate_feature_loss_lll
+        elif mode == 'lab':
+            self.calculate_style_loss = self.calculate_style_loss_lab
+            self.calculate_feature_loss = self.calculate_feature_loss_lab
+        else:
+            raise NotImplementedError
 
     def move_to_device(self, device):
         self.feature_extractor.to(device)
@@ -31,14 +39,28 @@ class FeatureLossHelper:
         prediction_lll = self.normalize_for_vgg((torch.cat((prediction_l, prediction_l, prediction_l), 1) + 0.5))
         return target_lll, prediction_lll
 
-    def calculate_feature_loss(self, target_l, prediction_l):
+    def calculate_feature_loss_lll(self, target_l, prediction_l):
         target_lll, prediction_lll = self.prepare_vgg_input(target_l, prediction_l)
         return self.criterion(self.feature_extractor(prediction_lll, self.layers_content)[0], self.feature_extractor(target_lll, self.layers_content)[0].detach())
 
-    def calculate_style_loss(self, target_l, prediction_l):
+    def calculate_feature_loss_lab(self, target_lab, prediction_lab):
+        return self.criterion(self.feature_extractor(prediction_lab, self.layers_content)[0], self.feature_extractor(target_lab, self.layers_content)[0].detach())
+
+    def calculate_style_loss_lll(self, target_l, prediction_l):
         target_lll, prediction_lll = self.prepare_vgg_input(target_l, prediction_l)
         features_prediction = self.feature_extractor(prediction_lll, self.layers_style)
         features_target = self.feature_extractor(target_lll, self.layers_style)
+        gram = GramMatrix()
+        error_maps = []
+        for m in range(len(features_target)):
+            gram_y = gram(features_prediction[m])
+            gram_s = gram(features_target[m].detach())
+            error_maps.append(self.criterion(gram_y, gram_s))
+        return error_maps
+
+    def calculate_style_loss_lab(self, target_lab, prediction_lab):
+        features_prediction = self.feature_extractor(prediction_lab, self.layers_style)
+        features_target = self.feature_extractor(target_lab, self.layers_style)
         gram = GramMatrix()
         error_maps = []
         for m in range(len(features_target)):

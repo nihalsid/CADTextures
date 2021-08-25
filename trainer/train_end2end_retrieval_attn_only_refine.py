@@ -29,7 +29,7 @@ class TextureEnd2EndModule(pl.LightningModule):
         encoder = lambda in_channels, z_channels: Encoder(ch=128, out_ch=3, ch_mult=(1, 1, 2, 2, 4), num_res_blocks=2, attn_resolutions=[8], dropout=0.0, resamp_with_conv=True, in_channels=in_channels, resolution=128, z_channels=z_channels, double_z=False)
         self.fenc_input, self.fenc_target = encoder(4, config.fenc_zdim), encoder(3, config.fenc_zdim)
         self.regression_loss = RegressionLossHelper(self.hparams.regression_loss_type)
-        self.feature_loss_helper = FeatureLossHelper(['relu4_2'], ['relu3_2', 'relu4_2'])
+        self.feature_loss_helper = FeatureLossHelper(['relu4_2'], ['relu3_2', 'relu4_2'], 'lab')
         self.mse_loss = torch.nn.MSELoss(reduction='mean')
         self.dataset = lambda split: TextureEnd2EndDataset(config, split, self.preload_dict)
         self.train_dataset = self.dataset('train')
@@ -90,8 +90,8 @@ class TextureEnd2EndModule(pl.LightningModule):
         refined_texture_l, refined_texture_ab = TextureMapPredictorModule.split_into_channels(refinement)
         loss_regression_ref_l = self.regression_loss.calculate_loss(gt_texture_l, refined_texture_l).mean()
         loss_regression_ref_ab = self.regression_loss.calculate_loss(gt_texture_ab, refined_texture_ab).mean()
-        loss_content_ref = self.feature_loss_helper.calculate_feature_loss(gt_texture_l, refined_texture_l).mean()
-        style_loss_maps = self.feature_loss_helper.calculate_style_loss(gt_texture_l, refined_texture_l)
+        loss_content_ref = self.feature_loss_helper.calculate_feature_loss(batch['texture'], refinement).mean()
+        style_loss_maps = self.feature_loss_helper.calculate_style_loss(batch['texture'], refinement)
         loss_style_ref = style_loss_maps[0].mean() + style_loss_maps[1].mean()
         # print(f"{loss_regression_ref_l.item()},{loss_regression_ref_ab.item()},{loss_content_ref.item()},{loss_style_ref.item()}")
         self.log("train/loss_regression_ref_l", loss_regression_ref_l * self.hparams.lambda_regr_l, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
@@ -126,8 +126,9 @@ class TextureEnd2EndModule(pl.LightningModule):
 
                 refinement, refinement_noret, refinement_noinp, s, b = self.attention_blending_decode(batch['mask_texture'], features_in.to(self.device), features_candidates.unsqueeze(1).to(self.device), return_debug_vis=True)
 
-                ds_vis.visualize_texture_batch_01(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(),  self.fold(batch['database_textures']).unsqueeze(1).cpu().numpy(), refinement_noret.cpu().numpy(), refinement_noinp.cpu().numpy(), refinement.cpu().numpy(),
+                ds_vis.visualize_texture_batch_01(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(),  self.fold(batch['database_textures']).unsqueeze(1).cpu().numpy(), refinement_noret.cpu().numpy(), refinement_noinp.cpu().numpy(), torch.ones_like(refinement_noinp).cpu().numpy(), refinement.cpu().numpy(),
                                                   s.cpu().numpy(), s.cpu().numpy(), lambda prefix: output_dir / "val_vis" / f"{prefix}_{batch_idx:04d}.jpg")
+
                 total_loss_ref_regression += self.mse_loss(refinement.to(self.device), batch['texture']).cpu().item()
 
         total_loss_ref_regression /= len(ds_vis)

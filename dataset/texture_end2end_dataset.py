@@ -192,12 +192,13 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         plt.savefig(outpath, bbox_inches='tight', dpi=240)
         plt.close()
 
-    def visualize_texture_batch_01(self, input_batch, target_batch, knn_batch, in_decode, tgt_decode, refinement_batch, scores, scores_blended, outpath):
+    def visualize_texture_batch_01(self, input_batch, target_batch, knn_batch, in_decode, retr_decode, tgt_decode, refinement_batch, scores, scores_blended, outpath):
         import matplotlib.pyplot as plt
         input_batch = input_batch.copy()
         target_batch = target_batch.copy()
         knn_batch = knn_batch.copy()
         in_decode = in_decode.copy()
+        retr_decode = retr_decode.copy()
         tgt_decode = tgt_decode.copy()
         refinement_batch = refinement_batch.copy()
         scores = scores.copy()
@@ -207,9 +208,10 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         target_batch = [self.denormalize_and_rgb(np.transpose(target_batch[i, :, :, :], (1, 2, 0))) for i in range(target_batch.shape[0])]
         refinement_batch = [self.denormalize_and_rgb(np.transpose(refinement_batch[i, :, :, :], (1, 2, 0))) for i in range(refinement_batch.shape[0])]
         in_decode = [self.denormalize_and_rgb(np.transpose(in_decode[i, :, :, :], (1, 2, 0))) for i in range(in_decode.shape[0])]
+        retr_decode = [self.denormalize_and_rgb(np.transpose(retr_decode[i, :, :, :], (1, 2, 0))) for i in range(retr_decode.shape[0])]
         tgt_decode = [self.denormalize_and_rgb(np.transpose(tgt_decode[i, :, :, :], (1, 2, 0))) for i in range(tgt_decode.shape[0])]
 
-        f, axarr = plt.subplots(7, len(input_batch), figsize=(4 * len(input_batch), 4 * 7))
+        f, axarr = plt.subplots(8, len(input_batch), figsize=(4 * len(input_batch), 4 * 8))
         for i in range(len(input_batch)):
             axarr[0, i].imshow(input_batch[i])
             axarr[0, i].axis('off')
@@ -221,10 +223,12 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
             axarr[3, i].axis('off')
             axarr[4, i].imshow(in_decode[i])
             axarr[4, i].axis('off')
-            axarr[5, i].imshow(tgt_decode[i])
+            axarr[5, i].imshow(retr_decode[i])
             axarr[5, i].axis('off')
-            axarr[6, i].imshow(refinement_batch[i])
+            axarr[6, i].imshow(tgt_decode[i])
             axarr[6, i].axis('off')
+            axarr[7, i].imshow(refinement_batch[i])
+            axarr[7, i].axis('off')
         plt.tight_layout()
         plt.savefig(outpath("out_"), bbox_inches='tight', dpi=60)
         plt.close()
@@ -240,7 +244,7 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
                 axarr[i * 3 + 2, j].axis('off')
             axarr[i * 3, knn_batch.shape[1]].imshow(target_batch[i])
             axarr[i * 3, knn_batch.shape[1]].axis('off')
-            axarr[i * 3 + 1, knn_batch.shape[1]].imshow(tgt_decode[i])
+            axarr[i * 3 + 1, knn_batch.shape[1]].imshow(retr_decode[i])
             axarr[i * 3 + 1, knn_batch.shape[1]].axis('off')
             axarr[i * 3 + 2, knn_batch.shape[1]].imshow(refinement_batch[i])
             axarr[i * 3 + 2, knn_batch.shape[1]].axis('off')
