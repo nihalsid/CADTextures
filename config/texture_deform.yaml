@@ -5,6 +5,7 @@ defaults:
 
 dataset:
   num_database_textures: 32
+  precomputed_retrieval_dir: null
 
 dictionary:
   patch_size: 16
@@ -34,10 +35,10 @@ num_workers: 8
 lr: 0.0001
 
 temperature: 0.1
-lambda_regr_l: 20
-lambda_regr_ab: 10
-lambda_content: 0.00075
-lambda_style: 500
+lambda_regr_l: 10
+lambda_regr_ab: 50
+lambda_content: 0.15
+lambda_style: 5000
 start_contrastive_weight: 0.01
 regression_loss_type: l1
 warmup_epochs_constrastive: 50
