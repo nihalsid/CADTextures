@@ -5,7 +5,7 @@ defaults:
 
 dataset:
   num_database_textures: 32
-  precomputed_retrieval_dir: null
+  precomputed_retrieval_dir: /rhome/ysiddiqui/CADTextures/saved_retrievals
 
 dictionary:
   patch_size: 16
