@@ -202,18 +202,27 @@ class AttnBlockRetrieval(nn.Module):
         super().__init__()
         self.in_channels = in_channels
 
-        self.norm_x = Normalize(in_channels)
+        # self.norm_x = Normalize(in_channels)
         self.norm_r = Normalize(in_channels)
-        self.q = torch.nn.Conv2d(in_channels,
-                                 in_channels,
-                                 kernel_size=1,
-                                 stride=1,
-                                 padding=0)
-        self.k = torch.nn.Conv2d(in_channels,
-                                 in_channels,
-                                 kernel_size=1,
-                                 stride=1,
-                                 padding=0)
+
+        self.q = nn.Sequential(ResnetBlock(in_channels=in_channels,
+                                           out_channels=in_channels,
+                                           temb_channels=0,
+                                           dropout=0.),
+                               ResnetBlock(in_channels=in_channels,
+                                           out_channels=in_channels,
+                                           temb_channels=0,
+                                           dropout=0.)
+                               )
+        self.k = nn.Sequential(ResnetBlock(in_channels=in_channels,
+                                           out_channels=in_channels,
+                                           temb_channels=0,
+                                           dropout=0.),
+                               ResnetBlock(in_channels=in_channels,
+                                           out_channels=in_channels,
+                                           temb_channels=0,
+                                           dropout=0.)
+                               )
         self.v = torch.nn.Conv2d(in_channels,
                                  in_channels,
                                  kernel_size=1,
@@ -227,10 +236,9 @@ class AttnBlockRetrieval(nn.Module):
                                         padding=0)
 
     def forward(self, x, r):
-        h_ = self.norm_x(x)
         i_ = self.norm_r(r)
-        q_ = self.q(h_).reshape((x.shape[0], x.shape[1], -1)).permute((0, 2, 1))
-        k_ = self.k(i_).reshape((x.shape[0], x.shape[1], -1)).permute((0, 2, 1))
+        q_ = self.q(x).reshape((x.shape[0], x.shape[1], -1)).permute((0, 2, 1))
+        k_ = self.k(r).reshape((x.shape[0], x.shape[1], -1)).permute((0, 2, 1))
         v_ = self.v(i_)
         b_ = (self.cos(q_, k_) * 0.5 + 0.5).reshape(x.shape[0], x.shape[2], x.shape[3]).unsqueeze(1)
         h_ = self.proj_out(v_)
