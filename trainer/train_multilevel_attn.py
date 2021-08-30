@@ -98,7 +98,7 @@ class TextureRegressionModule(pl.LightningModule):
                 # refinement, offsets = self.forward(batch)
                 refinement = self.forward(batch)
                 # ds_vis.visualize_texture_batch_02(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), refinement.cpu().numpy(), offsets.cpu().numpy(), lambda prefix: output_dir / "val_vis" / f"{prefix}_{batch_idx:04d}.jpg")
-                ds_vis.visualize_texture_batch_03(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), refinement.cpu().numpy(), lambda prefix: output_dir / "val_vis" / f"{prefix}_{batch_idx:04d}.jpg")
+                # ds_vis.visualize_texture_batch_03(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), refinement.cpu().numpy(), lambda prefix: output_dir / "val_vis" / f"{prefix}_{batch_idx:04d}.jpg")
                 total_loss_ref_regression += self.mse_loss(refinement.to(self.device), batch['texture']).cpu().item()
 
         total_loss_ref_regression /= len(ds_vis)

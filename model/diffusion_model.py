@@ -195,7 +195,7 @@ class AttnBlock(nn.Module):
         return x+h_
 
 
-class AttnBlockRetrieval(nn.Module):
+class BlendBlock(nn.Module):
 
     def __init__(self, in_channels):
 
@@ -243,6 +243,79 @@ class AttnBlockRetrieval(nn.Module):
         b_ = (self.cos(q_, k_) * 0.5 + 0.5).reshape(x.shape[0], x.shape[2], x.shape[3]).unsqueeze(1)
         h_ = self.proj_out(v_)
         return x * (1 - b_) + h_ * b_
+
+
+class SpanGumbleAttentionBlock(nn.Module):
+
+    def __init__(self, in_channels):
+        super().__init__()
+        self.in_channels = in_channels
+        self.unfold = nn.Unfold(kernel_size=(5, 5))
+
+        self.norm_r = Normalize(in_channels)
+        self.q = nn.Sequential(ResnetBlock(in_channels=in_channels,
+                                           out_channels=in_channels,
+                                           temb_channels=0,
+                                           dropout=0.),
+                               ResnetBlock(in_channels=in_channels,
+                                           out_channels=in_channels,
+                                           temb_channels=0,
+                                           dropout=0.)
+                               )
+        self.k = nn.Sequential(ResnetBlock(in_channels=in_channels,
+                                           out_channels=in_channels,
+                                           temb_channels=0,
+                                           dropout=0.),
+                               ResnetBlock(in_channels=in_channels,
+                                           out_channels=in_channels,
+                                           temb_channels=0,
+                                           dropout=0.)
+                               )
+        self.v = torch.nn.Conv2d(in_channels,
+                                 in_channels,
+                                 kernel_size=1,
+                                 stride=1,
+                                 padding=0)
+        self.cos = torch.nn.CosineSimilarity(dim=2)
+        self.proj_out = torch.nn.Conv2d(in_channels,
+                                        in_channels,
+                                        kernel_size=1,
+                                        stride=1,
+                                        padding=0)
+
+    def forward(self, x, r):
+        batch_size, h, w = x.shape[0], x.shape[2], x.shape[3]
+        q_ = self.q(x)
+        k_ = self.k(nn.functional.pad(r, (2, 2, 2, 2)))
+        v_ = self.v(nn.functional.pad(self.norm_r(r), (2, 2, 2, 2)))
+        q_ = q_.reshape([batch_size, self.in_channels, -1]).permute((0, 2, 1)).reshape((-1, self.in_channels))
+        k_ = self.unfold(k_).reshape([batch_size, self.in_channels, 5 * 5, -1]).permute((0, 3, 1, 2)).reshape((-1, self.in_channels, 5 * 5))
+        v_ = self.unfold(v_).reshape([batch_size, self.in_channels, 5 * 5, -1]).permute((0, 3, 1, 2)).reshape((-1, self.in_channels, 5 * 5))
+        scores = torch.einsum('ij,ijk->ik', torch.nn.functional.normalize(q_, dim=1), torch.nn.functional.normalize(k_, dim=1)) * 50
+        selection_mask = torch.nn.functional.gumbel_softmax(scores, tau=1, hard=True)
+        selected_v_ = torch.einsum('ij,ijk->ik', selection_mask, v_.permute(0, 2, 1)).reshape((batch_size, h, w, self.in_channels)).permute((0, 3, 1, 2))
+        selected_k_ = torch.einsum('ij,ijk->ik', selection_mask, k_.permute(0, 2, 1))
+        b_ = (self.cos(q_.reshape((batch_size, h * w, -1)), selected_k_.reshape((batch_size, h * w, -1))) * 0.5 + 0.5).reshape(batch_size, h, w).unsqueeze(1)
+        h_ = self.proj_out(selected_v_)
+        return x * (1 - b_) + h_ * b_
+
+
+class RetrieveDeformBlock(nn.Module):
+
+    def __init__(self, in_channels):
+        super().__init__()
+        self.in_channels = in_channels
+
+        self.norm = Normalize(in_channels)
+
+        self.deform_conv = DeformConv2d(in_channels, in_channels, kernel_size=3, stride=1, padding=1)
+        self.deform_offset = torch.nn.Conv2d(in_channels, 3 * 3 * 2, kernel_size=3, stride=1, padding=1, bias=False)
+
+    def forward(self, x, r):
+        r = self.norm(r)
+        offsets = self.deform_offset(r)
+        v = self.deform_conv(r, offsets)
+        return x + v
 
 
 class Model(nn.Module):
@@ -658,7 +731,7 @@ class DecoderWithRetrieval(nn.Module):
                         temb_channels=self.temb_ch,
                         dropout=dropout),
         )
-        self.retrieval_attn = nn.ModuleList([AttnBlockRetrieval(ch), AttnBlockRetrieval(ch)])
+        self.retrieval_attn = nn.ModuleList([SpanGumbleAttentionBlock(ch), SpanGumbleAttentionBlock(ch)])
 
         # upsampling
         self.up = nn.ModuleList()
