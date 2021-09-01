@@ -245,7 +245,7 @@ class BlendBlock(nn.Module):
         return x * (1 - b_) + h_ * b_
 
 
-class SpanGumbleAttentionBlock(nn.Module):
+class SpanGumbelAttentionBlock(nn.Module):
 
     def __init__(self, in_channels):
         super().__init__()
@@ -297,7 +297,7 @@ class SpanGumbleAttentionBlock(nn.Module):
         selected_k_ = torch.einsum('ij,ijk->ik', selection_mask, k_.permute(0, 2, 1))
         b_ = (self.cos(q_.reshape((batch_size, h * w, -1)), selected_k_.reshape((batch_size, h * w, -1))) * 0.5 + 0.5).reshape(batch_size, h, w).unsqueeze(1)
         h_ = self.proj_out(selected_v_)
-        return x * (1 - b_) + h_ * b_
+        return x * (1 - b_) + h_ * b_, b_.squeeze(1)
 
 
 class RetrieveDeformBlock(nn.Module):
@@ -731,7 +731,7 @@ class DecoderWithRetrieval(nn.Module):
                         temb_channels=self.temb_ch,
                         dropout=dropout),
         )
-        self.retrieval_attn = nn.ModuleList([SpanGumbleAttentionBlock(ch), SpanGumbleAttentionBlock(ch)])
+        self.retrieval_attn = nn.ModuleList([SpanGumbelAttentionBlock(ch), SpanGumbelAttentionBlock(ch)])
 
         # upsampling
         self.up = nn.ModuleList()
@@ -767,7 +767,7 @@ class DecoderWithRetrieval(nn.Module):
     def forward(self, z, retrieval):
         #assert z.shape[1:] == self.z_shape[1:]
         self.last_z_shape = z.shape
-
+        b = [None, None]
         # timestep embedding
         temb = None
 
@@ -791,7 +791,7 @@ class DecoderWithRetrieval(nn.Module):
             if i_level != 0:
                 h = self.up[i_level].upsample(h)
             if i_level == 0 or i_level == 1:
-                h = self.retrieval_attn[i_level](h, ret_feats[i_level])
+                h, b[i_level] = self.retrieval_attn[i_level](h, ret_feats[i_level])
 
         # end
         if self.give_pre_end:
@@ -801,9 +801,9 @@ class DecoderWithRetrieval(nn.Module):
         h = nonlinearity(h)
         h = self.conv_out(h)
         if self.use_tanh:
-            return self.tanh(h) * 0.5
+            return self.tanh(h) * 0.5, b
         else:
-            return h
+            return h, b
 
 
 class VUNet(nn.Module):
