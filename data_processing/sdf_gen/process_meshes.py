@@ -44,7 +44,7 @@ if __name__ == '__main__':
     dataset_0, dataset_1 = args.dataset.split('/')
     shape_path = Path(base_dir, f"data/{dataset_0}-model/{dataset_1}", args.model_id, "normalized_model.obj")
     output_path = Path(base_dir, f"data/{dataset_0}/{dataset_1}", args.model_id, f'shape_df')
-    mesh = trimesh.load(shape_path, force='mesh')
+    mesh = trimesh.load(shape_path, force='mesh', process=False)
     if type(mesh) != trimesh.Trimesh:
         mesh = mesh.dump().sum()
     bbox = mesh.bounding_box.bounds

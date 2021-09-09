@@ -1,0 +1,4 @@
+# @package _group_
+name: 'ShapeNetV2/DatasetTest_01'
+data_dir: 'data'
+splits_dir: 'overfit'
