@@ -1,9 +1,9 @@
 defaults:
-  - dataset: single_cube_dice
+  - dataset: single_cube_textures
   - inputs: 2d_partial_texture
   - model: singlecube_colors
 
-shape: "00000"
+shape: dtd-cracked_cracked_0004
 view_index: 0
 
 model:
@@ -22,7 +22,7 @@ resume: null
 
 batch_size: 8
 num_workers: 8
-lr: 0.0001
+lr: 0.0005
 lambda_content: 0.075
 lambda_style: 0.0075
 lambda_g: 1
@@ -32,7 +32,7 @@ gan_loss_type: wgan_gp
 
 num_patches: 5
 patch_size: 25
-generator: texture
+generator: cnn
 
 hydra:
   output_subdir: null # Disable saving of config files. We'll do that ourselves.
