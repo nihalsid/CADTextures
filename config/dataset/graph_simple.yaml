@@ -1,0 +1,4 @@
+# @package _group_
+name: 'ShapeNetV2/DatasetSimple'
+data_dir: 'data'
+splits_dir: 'official'

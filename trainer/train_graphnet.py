@@ -6,6 +6,7 @@ import hydra
 import wandb
 from pytorch_lightning import seed_everything
 from pytorch_lightning.loggers import WandbLogger
+from tqdm import tqdm
 
 from dataset.graph_mesh_dataset import GraphMeshDataset
 import torch
@@ -65,8 +66,8 @@ def train(model, traindataset, valdataset, device, config, logger):
 
         shuffled_indices = list(range(len(traindataset)))
         random.shuffle(shuffled_indices)
-
-        for iter_idx, i in enumerate(shuffled_indices):
+        pbar = tqdm(list(enumerate(shuffled_indices)), desc=f'Epoch {epoch:03d}')
+        for iter_idx, i in pbar:
             sample = traindataset[i]
             # move batch to device
             sample = sample.to(device)
@@ -90,9 +91,10 @@ def train(model, traindataset, valdataset, device, config, logger):
             iteration = epoch * len(traindataset) + iter_idx
 
             if iteration % config.print_interval == (config.print_interval - 1):
-                print(f'[{epoch:03d}/{iter_idx:05d}] train_loss: {train_loss_running / config.print_interval:.3f}')
-                logger.log_metrics({'loss_train': train_loss_running / config.print_interval}, iteration)
+                last_train_loss = train_loss_running / config.print_interval
+                logger.log_metrics({'loss_train': last_train_loss}, iteration)
                 train_loss_running = 0.
+                pbar.set_postfix({'loss': f'{last_train_loss:.4f}'})
 
         # validation evaluation and logging
         if epoch % config.val_check_interval == (config.val_check_interval - 1):
