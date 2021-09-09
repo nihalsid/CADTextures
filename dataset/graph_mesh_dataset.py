@@ -76,7 +76,7 @@ class GraphMeshDataset(InMemoryDataset):
     def visualize_graph_with_predictions(self, item, prediction, output_dir, output_suffix):
         output_dir = Path(output_dir)
         output_dir.mkdir(exist_ok=True, parents=True)
-        mesh = trimesh.load(Path(self.raw_dir, item.name) / "model_normalized.obj", force='mesh', process=False)
+        mesh = trimesh.load(Path(self.raw_dir, item.name.split('_')[0]) / "model_normalized.obj", force='mesh', process=False)
         mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, vertex_colors=prediction + 0.5, process=False)
         mesh.export(output_dir / f"{item.name}_{output_suffix}.obj")
 
