@@ -52,6 +52,7 @@ def subdivide_and_vertexcolor_meshes(input_folder, target_folder, process_id, to
     target_folder.mkdir(exist_ok=True, parents=True)
     meshes = sorted([(x / "models" / "model_normalized.obj") for x in input_folder.iterdir() if (x / "models" / "model_normalized.obj").exists()], key=lambda x: x.name)
     meshes = [x for i, x in enumerate(meshes) if i % total_procs == process_id]
+    # meshes = [x for x in meshes if x.parent.parent.name == '1ab4c6ef68073113cf004563556ddb36']
     logger.info(f'Proc {process_id + 1}/{total_procs} processing {len(meshes)}')
     for mesh in tqdm(meshes):
         (target_folder / mesh.parents[1].name).mkdir(exist_ok=True)

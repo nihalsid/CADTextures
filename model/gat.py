@@ -92,27 +92,21 @@ class MLP(nn.Module):
         super(MLP, self).__init__()
         self.sage = nn.Sequential(
             nn.Linear(in_channels, nf),
-            nn.BatchNorm1d(nf),
             nn.ReLU(),
 
             nn.Linear(nf, nf),
-            nn.BatchNorm1d(nf),
             nn.ReLU(),
 
             nn.Linear(nf, nf),
-            nn.BatchNorm1d(nf),
             nn.ReLU(),
 
             nn.Linear(nf, nf),
-            nn.BatchNorm1d(nf),
             nn.ReLU(),
 
             nn.Linear(nf, nf),
-            nn.BatchNorm1d(nf),
             nn.ReLU(),
 
             nn.Linear(nf, nf),
-            nn.BatchNorm1d(nf),
         )
         self.out = nn.Linear(nf, out_channels)
         self.tanh = torch.nn.Tanh()
@@ -122,7 +116,6 @@ class MLP(nn.Module):
         x = data.x
         x = self.sage(x)
         x = F.leaky_relu(x, 0.02)
-        x = F.dropout(x, p=self.dropout, training=self.training)
         x = self.out(x)
         return self.tanh(x) * 0.5
 

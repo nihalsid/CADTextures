@@ -9,9 +9,9 @@ from torch_geometric.data import Data, InMemoryDataset
 import numpy as np
 from tqdm import tqdm
 
-from util.embedder import get_embedder_nerf
 from util.mesh_proc import mesh_proc
 from util.misc import read_list
+from util.embedder import get_embedder_nerf
 
 
 class GraphMeshDataset(InMemoryDataset):
@@ -30,9 +30,11 @@ class GraphMeshDataset(InMemoryDataset):
     @staticmethod
     def read_mesh_data(path_all, path_input, x, y):
         nodes, input_colors, valid_colors, target_colors, edges, edge_features, vertex_features = mesh_proc(str(path_all), str(path_input))
+        # nodes = -1 + (nodes - nodes.min()) / (nodes.max() - nodes.min()) * 2
         # embedder, embedder_out_dim = get_embedder_nerf(10, input_dims=3, i=0)
         # nodes = embedder(torch.from_numpy(nodes)).numpy()
         mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1), vertex_features))).float(),
+        # mesh_data = Data(x=torch.from_numpy(nodes).float(),
         # mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1)))).float(),
                          y=torch.from_numpy(target_colors).float(),
                          edge_index=torch.from_numpy(np.hstack([edges, edges[[1, 0], :]])).long(),

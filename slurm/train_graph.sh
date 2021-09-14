@@ -4,7 +4,7 @@
 ##SBATCH --nodes=1
 ##SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=250gb
+#SBATCH --mem=80gb
 #SBATCH --gpus=1
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=yawar.siddiqui@tum.de

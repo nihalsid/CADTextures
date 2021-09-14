@@ -113,8 +113,9 @@ def render_and_export(input_path, export_path, proc, num_proc):
     export_path.mkdir(exist_ok=True, parents=True)
     meshes = sorted([(x / "models" / "model_normalized.obj") for x in input_path.iterdir() if (x / "models" / "model_normalized.obj").exists()], key=lambda x: x.name)
     meshes = [x for i, x in enumerate(meshes) if i % num_proc == proc]
-    # splitlist = Path("data/splits/ShapeNetV2/DatasetSimple/official/train.txt").read_text().splitlines() + Path("data/splits/ShapeNetV2/DatasetSimple/official/val.txt").read_text().splitlines()
+    # splitlist = Path("data/splits/ShapeNetV2/DatasetSimple/official/val.txt").read_text().splitlines()
     # meshes = [x for x in meshes if x.parent.parent.name in splitlist]
+    # meshes = [x for x in meshes if x.parent.parent.name in ['1ab4c6ef68073113cf004563556ddb36']]
     logger.info(f'Proc {proc + 1}/{num_proc} processing {len(meshes)}')
     for mesh in tqdm(meshes):
         (export_path / mesh.parents[1].name / "render").mkdir(exist_ok=True)
@@ -125,9 +126,9 @@ def render_and_export(input_path, export_path, proc, num_proc):
 def project_and_export(input_path, proc, num_proc):
     meshes = sorted([(x / "model_normalized.obj") for x in input_path.iterdir() if (x / "model_normalized.obj").exists()], key=lambda x: x.name)
     meshes = [x for i, x in enumerate(meshes) if i % num_proc == proc]
-    # splitlist = Path("data/splits/ShapeNetV2/DatasetSimple/official/train.txt").read_text().splitlines() + Path("data/splits/ShapeNetV2/DatasetSimple/official/val.txt").read_text().splitlines()
+    # splitlist = Path("data/splits/ShapeNetV2/DatasetSimple/official/val.txt").read_text().splitlines()
     # meshes = [x for x in meshes if x.parent.name in splitlist]
-    # meshes = [x for x in meshes if x.parent.name in ["10"]]
+    # meshes = [x for x in meshes if x.parent.name in ["1ab4c6ef68073113cf004563556ddb36"]]
     logger.info(f'Proc {proc + 1}/{num_proc} processing {len(meshes)}')
     for mesh in tqdm(meshes):
         mesh_geometry = trimesh.load(mesh, force='mesh', process=False)

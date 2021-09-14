@@ -41,7 +41,7 @@ class FilesystemLogger(LightningLoggerBase):
             experiment_dir = Path("runs", self.experiment_config["experiment"])
             experiment_dir.mkdir(exist_ok=True, parents=True)
 
-            src_folders = ['config', 'data/splits', 'model', 'tests', 'trainer', 'util', 'data_processing']
+            src_folders = ['config', 'data/splits', 'model', 'tests', 'trainer', 'util', 'data_processing', 'dataset']
             sources = []
             for src in src_folders:
                 sources.extend(list(Path(".").glob(f'{src}/**/*')))

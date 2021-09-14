@@ -1147,3 +1147,14 @@ class DeformableEncoder(nn.Module):
 
         h = self.conv_out(h)
         return h, offsets
+
+
+class EncoderDecoder(nn.Module):
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.encoder = Encoder(ch=128, out_ch=out_channels, ch_mult=(1, 1, 2, 2, 4), num_res_blocks=2, attn_resolutions=[8], dropout=0.0, resamp_with_conv=True, in_channels=in_channels, resolution=128, z_channels=256, use_unfold=False, double_z=False)
+        self.decoder = Decoder(ch=128, out_ch=out_channels, ch_mult=(1, 1, 2, 2, 4), num_res_blocks=2, attn_resolutions=[8], dropout=0.0, resamp_with_conv=True, in_channels=in_channels, resolution=128, z_channels=256, double_z=False)
+
+    def forward(self, x):
+        return self.decoder(self.encoder(x))

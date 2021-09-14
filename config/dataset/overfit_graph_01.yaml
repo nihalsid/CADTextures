@@ -1,4 +1,4 @@
 # @package _group_
-name: 'ShapeNetV2/DatasetTest_01'
+name: 'ShapeNetV2/DatasetTest_02'
 data_dir: 'data'
 splits_dir: 'overfit'
