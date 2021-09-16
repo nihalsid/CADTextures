@@ -66,8 +66,8 @@ class GraphSAGENet(nn.Module):
 
     def __init__(self, in_channels, out_channels, nf, dropout):
         super(GraphSAGENet, self).__init__()
-        self.sage = GraphSAGE(in_channels, nf, 7, dropout, torch.nn.LeakyReLU(0.02))
-        self.out = SAGEConv(nf, out_channels)
+        self.sage = GraphSAGE(in_channels, nf, 7, dropout, torch.nn.LeakyReLU(0.02), aggr='max')
+        self.out = SAGEConv(nf, out_channels, aggr='max')
         self.tanh = torch.nn.Tanh()
         self.dropout = dropout
 

@@ -23,13 +23,13 @@ def GATNetTrainer(config, logger):
     device = torch.device('cuda:0')
 
     # create dataloaders
-    trainset = GraphMeshDataset(config, 'train')
+    trainset = GraphMeshDataset(config, 'train', use_single_view=True)
 
-    valset = GraphMeshDataset(config, 'val')
+    valset = GraphMeshDataset(config, 'val', use_single_view=True)
 
     # instantiate model
     # model = GATNet(3 + 3 + 1 + 6, 3, 16, 4, 8, 1, 0.0)
-    model = GraphSAGENet(3 + 3 + 1 + 6, 3, 64, 0)
+    model = GraphSAGENet(63 + 3 + 1 + 6, 3, 64, 0)
     # model = MLP(63 + 3 + 1, 3, 64, 0)
     # model = GCNNet(3 + 3 + 1 + 5, 3, 32, 0)
     # print_model_parameter_count(model)

@@ -7,7 +7,7 @@ save_epoch: 1
 sanity_steps: 0
 max_epoch: 5000
 val_check_percent: 1.0
-val_check_interval: 1
+val_check_interval: 500
 print_interval: 1
 resume: null
 

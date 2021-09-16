@@ -71,7 +71,8 @@ def render_mesh(mesh, output_dir):
         scene.add(geo)
     for n in lights:
         scene.add_node(n, scene.main_camera_node)
-    for x_angle in range(180, 120, -15):
+    # original angles: x (180, 120, -15), y (0, 360, 45), z 180
+    for x_angle in range(225, 60, -45):
         for y_angle in range(0, 360, 45):
             camera_pose = np.eye(4)
             camera_pose[:3, :3] = Rotation.from_euler('y', y_angle, degrees=True).as_matrix() @ Rotation.from_euler('z', 180, degrees=True).as_matrix() @ Rotation.from_euler('x', x_angle, degrees=True).as_matrix()
@@ -86,9 +87,23 @@ def render_mesh(mesh, output_dir):
             scene.remove_node(cam_node)
 
 
-def world_to_pixel(mesh, image, depth, projection_matrix, camera_pose, output_path):
+def create_mesh_for_view(mesh, image, depth, projection_matrix, camera_pose, output_path):
+    vertex_colors = get_projected_colors(mesh, image, depth, projection_matrix, camera_pose)
+    trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, vertex_colors=vertex_colors, process=False).export(output_path)
+
+
+def create_mesh_from_all_views(mesh, images, depths, projection_matrices, camera_poses, output_path):
+    vertex_color_buffer = np.zeros((mesh.vertices.shape[0], 4), dtype=np.float32)
+    for i in range(len(images)):
+        vertex_color_buffer += get_projected_colors(mesh, images[i], depths[i], projection_matrices[i], camera_poses[i])
+    counts = vertex_color_buffer[:, 3] / 255
+    non_zero_counts = np.where(counts != 0)[0]
+    vertex_color_buffer[non_zero_counts, :] = vertex_color_buffer[non_zero_counts, :] / np.repeat(counts[non_zero_counts].reshape((-1, 1)), 4, axis=1)
+    trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, vertex_colors=vertex_color_buffer, process=False).export(output_path)
+
+
+def get_projected_colors(mesh, image, depth, projection_matrix, camera_pose):
     vertices = np.vstack([mesh.vertices.T, np.ones((1, mesh.vertices.shape[0]))])
-    # todo: ask dejan why this needs to be hacked like this to get correct orientation
     projection_matrix[0, 0] = -projection_matrix[0, 0]
     uv = projection_matrix @ np.linalg.inv(camera_pose) @ vertices
     uv[0, :] = uv[0, :] / uv[2, :]
@@ -104,7 +119,7 @@ def world_to_pixel(mesh, image, depth, projection_matrix, camera_pose, output_pa
     vertex_colors = np.zeros((mesh.vertices.shape[0], 4), dtype=np.float32)
     vertex_colors[uv_int_mask, :3] = valid_colors
     vertex_colors[uv_int_mask, 3] = 255
-    trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, vertex_colors=vertex_colors, process=False).export(output_path)
+    return vertex_colors
     # image[uv_int[1, uv_int_mask], uv_int[0, uv_int_mask], :] = [255, 0, 0]
     # Image.fromarray(image).save("test.jpg")
 
@@ -112,15 +127,18 @@ def world_to_pixel(mesh, image, depth, projection_matrix, camera_pose, output_pa
 def render_and_export(input_path, export_path, proc, num_proc):
     export_path.mkdir(exist_ok=True, parents=True)
     meshes = sorted([(x / "models" / "model_normalized.obj") for x in input_path.iterdir() if (x / "models" / "model_normalized.obj").exists()], key=lambda x: x.name)
+    # meshes = sorted([(x / "model_normalized.obj") for x in input_path.iterdir() if (x / "model_normalized.obj").exists()], key=lambda x: x.name)
     meshes = [x for i, x in enumerate(meshes) if i % num_proc == proc]
     # splitlist = Path("data/splits/ShapeNetV2/DatasetSimple/official/val.txt").read_text().splitlines()
     # meshes = [x for x in meshes if x.parent.parent.name in splitlist]
     # meshes = [x for x in meshes if x.parent.parent.name in ['1ab4c6ef68073113cf004563556ddb36']]
     logger.info(f'Proc {proc + 1}/{num_proc} processing {len(meshes)}')
     for mesh in tqdm(meshes):
-        (export_path / mesh.parents[1].name / "render").mkdir(exist_ok=True)
+        parent_dir = mesh.parents[1].name
+        # parent_dir = mesh.parents[1].name
+        (export_path / parent_dir / "render").mkdir(exist_ok=True)
         mesh_geometry = trimesh.load(mesh, force='scene')
-        render_mesh(mesh_geometry, export_path / mesh.parents[1].name / "render")
+        render_mesh(mesh_geometry, export_path / parent_dir / "render")
 
 
 def project_and_export(input_path, proc, num_proc):
@@ -133,11 +151,17 @@ def project_and_export(input_path, proc, num_proc):
     for mesh in tqdm(meshes):
         mesh_geometry = trimesh.load(mesh, force='mesh', process=False)
         flat_render_list = sorted([x for x in (mesh.parent / "render").iterdir() if x.name.startswith('flat_')])
+        flat_renders, depths, projection_matrices, camera_poses = [], [], [], []
         for fr in flat_render_list:
             flat_render = np.array(Image.open(fr))
             rx, ry = fr.stem.split('_')[1:3]
             camera = np.load(f"{fr.parent}/camera_{rx}_{ry}.npz")
-            world_to_pixel(mesh_geometry, flat_render, camera['depth'], camera['cam_intrinsic'], camera['cam_extrinsic'], mesh.parent / f"model_normalized_input_{rx}_{ry}.obj")
+            flat_renders.append(flat_render)
+            depths.append(camera['depth'])
+            projection_matrices.append(camera['cam_intrinsic'])
+            camera_poses.append(camera['cam_extrinsic'])
+            create_mesh_for_view(mesh_geometry, flat_render, camera['depth'], camera['cam_intrinsic'], camera['cam_extrinsic'], mesh.parent / f"model_normalized_input_{rx}_{ry}.obj")
+        create_mesh_from_all_views(mesh_geometry, flat_renders, depths, projection_matrices, camera_poses, mesh.parent / f"model_normalized.obj")
 
 
 if __name__ == "__main__":

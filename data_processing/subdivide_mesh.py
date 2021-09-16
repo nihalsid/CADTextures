@@ -21,7 +21,7 @@ ch.setFormatter(formatter)
 logger.addHandler(fh)
 logger.addHandler(ch)
 
-SUBDIVISION_SIZE = 0.15
+SUBDIVISION_SIZE = 0.05
 
 
 def subdivide_and_vertexcolor_mesh(mesh_inpath, mesh_outpath):

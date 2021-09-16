@@ -4,6 +4,7 @@ import torch
 class RegressionLossHelper:
 
     def __init__(self, regression_loss_type):
+        self.l1_loss = torch.nn.L1Loss(reduction='none')
         self.l2_loss = torch.nn.MSELoss(reduction='none')
         if regression_loss_type == 'l1':
             self.calculate_loss = self.calculate_l1_loss

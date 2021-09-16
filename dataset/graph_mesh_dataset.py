@@ -21,18 +21,18 @@ class GraphMeshDataset(InMemoryDataset):
         self.split_name = f'{config.dataset.splits_dir}_{split}'
         item_list = read_list(splits_file)
         if use_single_view:
-            self.items = [(item, 150, 180) for item in item_list]
+            self.items = [(item, 180, 45) for item in item_list]
         else:
-            self.items = [(item, x, y) for item in item_list for x in range(180, 120, -15) for y in range(0, 360, 45)]
+            self.items = [(item, x, y) for item in item_list for x in range(225, 60, -45) for y in range(0, 360, 45)]
         super().__init__(Path(config.dataset.data_dir, config.dataset.name), transform, pre_transform)
         self.data, self.slices = torch.load(self.processed_paths[0])
 
     @staticmethod
     def read_mesh_data(path_all, path_input, x, y):
         nodes, input_colors, valid_colors, target_colors, edges, edge_features, vertex_features = mesh_proc(str(path_all), str(path_input))
-        # nodes = -1 + (nodes - nodes.min()) / (nodes.max() - nodes.min()) * 2
-        # embedder, embedder_out_dim = get_embedder_nerf(10, input_dims=3, i=0)
-        # nodes = embedder(torch.from_numpy(nodes)).numpy()
+        nodes = -1 + (nodes - nodes.min()) / (nodes.max() - nodes.min()) * 2
+        embedder, embedder_out_dim = get_embedder_nerf(10, input_dims=3, i=0)
+        nodes = embedder(torch.from_numpy(nodes)).numpy()
         mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1), vertex_features))).float(),
         # mesh_data = Data(x=torch.from_numpy(nodes).float(),
         # mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1)))).float(),
