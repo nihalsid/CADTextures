@@ -1,11 +1,11 @@
 defaults:
-  - dataset: overfit_graph_01
+  - dataset: graph_cube_textures_overfit_04
 
 experiment: fast_dev
 seed: null
 save_epoch: 1
 sanity_steps: 0
-max_epoch: 5000
+max_epoch: 50000
 val_check_percent: 1.0
 val_check_interval: 500
 print_interval: 1

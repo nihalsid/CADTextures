@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from dataset.graph_mesh_dataset import GraphMeshDataset
 import torch
-from model.gat import GATNet, GraphSAGENet, GCNNet, MLP
+from model.graphnet import GATNet, GraphSAGENet, GCNNet, GraphUNet
 from util.misc import print_model_parameter_count
 from util.regression_loss import RegressionLossHelper
 
@@ -23,14 +23,14 @@ def GATNetTrainer(config, logger):
     device = torch.device('cuda:0')
 
     # create dataloaders
-    trainset = GraphMeshDataset(config, 'train', use_single_view=True)
+    trainset = GraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view)
 
-    valset = GraphMeshDataset(config, 'val', use_single_view=True)
+    valset = GraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view)
 
     # instantiate model
     # model = GATNet(3 + 3 + 1 + 6, 3, 16, 4, 8, 1, 0.0)
     model = GraphSAGENet(63 + 3 + 1 + 6, 3, 64, 0)
-    # model = MLP(63 + 3 + 1, 3, 64, 0)
+    # model = GraphUNet(3 + 3 + 1 + 6, 64, 3, 7, act=torch.nn.functional.leaky_relu)
     # model = GCNNet(3 + 3 + 1 + 5, 3, 32, 0)
     # print_model_parameter_count(model)
     # load model if resuming from checkpoint
@@ -75,10 +75,10 @@ def train(model, traindataset, valdataset, device, config, logger):
             optimizer.zero_grad()
 
             # forward pass
-            prediction = model(sample)
+            prediction = model(sample.x, sample.edge_index)
 
             # compute loss
-            loss_total = loss_criterion.calculate_loss(prediction, sample.y).mean(dim=1).mean()
+            loss_total = loss_criterion.calculate_loss(prediction[:sample.y.shape[0], :], sample.y).mean(dim=1).mean()
 
             # compute gradients on loss_total
             loss_total.backward()
@@ -110,7 +110,8 @@ def train(model, traindataset, valdataset, device, config, logger):
                 sample_val = sample_val.to(device)
 
                 with torch.no_grad():
-                    prediction = model(sample_val)
+                    prediction = model(sample_val.x, sample_val.edge_index)
+                    prediction = prediction[:sample_val.y.shape[0], :]
 
                 loss_total_val += loss_criterion.calculate_loss(prediction, sample_val.y).mean().item()
                 valdataset.visualize_graph_with_predictions(sample_val, sample_val.y.cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'gt')
@@ -138,7 +139,7 @@ def main(config):
     if config.seed is None:
         config.seed = randint(0, 999)
     ds_name = '_'.join(config.dataset.name.split('/'))
-    logger = WandbLogger(project=f'GATNet{config.suffix}[{ds_name}]', name=config.experiment, id=config.experiment, settings=wandb.Settings(start_method='fork'))
+    logger = WandbLogger(project=f'GATNet{config.suffix}[{ds_name}]', name=config.experiment, id=config.experiment)
     seed_everything(config.seed)
     GATNetTrainer(config, logger)
 

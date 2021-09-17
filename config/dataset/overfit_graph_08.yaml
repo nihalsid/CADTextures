@@ -2,3 +2,4 @@
 name: 'ShapeNetV2/DatasetTest_08'
 data_dir: 'data'
 splits_dir: 'overfit'
+single_view: True
