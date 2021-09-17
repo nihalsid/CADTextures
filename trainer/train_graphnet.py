@@ -22,17 +22,20 @@ def GATNetTrainer(config, logger):
     # declare device
     device = torch.device('cuda:0')
 
+    # instantiate model
+    # model = GATNet(3 + 3 + 1 + 6, 3, 16, 4, 8, 1, 0.0)
+    model = GraphSAGENet(63 + 3 + 1 + 6, 3, 128, 0)
+    # model = GraphUNet(3 + 3 + 1 + 6, 64, 3, 7, act=torch.nn.functional.leaky_relu)
+    # model = GCNNet(3 + 3 + 1 + 5, 3, 32, 0)
+    print_model_parameter_count(model)
+
     # create dataloaders
     trainset = GraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view)
 
     valset = GraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view)
 
-    # instantiate model
-    # model = GATNet(3 + 3 + 1 + 6, 3, 16, 4, 8, 1, 0.0)
-    model = GraphSAGENet(63 + 3 + 1 + 6, 3, 64, 0)
-    # model = GraphUNet(3 + 3 + 1 + 6, 64, 3, 7, act=torch.nn.functional.leaky_relu)
-    # model = GCNNet(3 + 3 + 1 + 5, 3, 32, 0)
-    # print_model_parameter_count(model)
+    valvisset = GraphMeshDataset(config, 'val_vis', use_single_view=True)
+
     # load model if resuming from checkpoint
     if config.resume is not None:
         model.load_state_dict(torch.load(config.resume, map_location='cpu'))
@@ -44,10 +47,10 @@ def GATNetTrainer(config, logger):
     Path(f'runs/{config.experiment}').mkdir(exist_ok=True, parents=True)
 
     # start training
-    train(model, trainset, valset, device, config, logger)
+    train(model, trainset, valset, valvisset, device, config, logger)
 
 
-def train(model, traindataset, valdataset, device, config, logger):
+def train(model, traindataset, valdataset, valvisdataset, device, config, logger):
 
     # declare loss and move to specified device
     loss_criterion = RegressionLossHelper('l1')
@@ -114,15 +117,23 @@ def train(model, traindataset, valdataset, device, config, logger):
                     prediction = prediction[:sample_val.y.shape[0], :]
 
                 loss_total_val += loss_criterion.calculate_loss(prediction, sample_val.y).mean().item()
-                valdataset.visualize_graph_with_predictions(sample_val, sample_val.y.cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'gt')
-                valdataset.visualize_graph_with_predictions(sample_val, prediction.cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'pred')
-                valdataset.visualize_graph_with_predictions(sample_val, sample_val.x[:, 3:6].cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'in')
 
             print(f'[{epoch:03d}] val_loss: {loss_total_val / len(valdataset):.3f}')
             logger.log_metrics({'loss_val': loss_total_val / len(valdataset)}, epoch * len(traindataset))
 
             if epoch % config.save_epoch == (config.save_epoch - 1):
                 torch.save(model.state_dict(), f'runs/{config.experiment}/model_{epoch}.ckpt')
+
+            for sample_val in valvisdataset:
+                sample_val = sample_val.to(device)
+
+                with torch.no_grad():
+                    prediction = model(sample_val.x, sample_val.edge_index)
+                    prediction = prediction[:sample_val.y.shape[0], :]
+
+                valvisdataset.visualize_graph_with_predictions(sample_val, sample_val.y.cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'gt')
+                valvisdataset.visualize_graph_with_predictions(sample_val, prediction.cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'pred')
+                valvisdataset.visualize_graph_with_predictions(sample_val, sample_val.x[:, 3:6].cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'in')
 
             # set model back to train
             model.train()

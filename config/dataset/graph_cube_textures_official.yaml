@@ -2,4 +2,4 @@
 name: 'SingleShape/CubeTexturesForGraph'
 single_view: False
 data_dir: 'data'
-splits_dir: 'overfit_004'
+splits_dir: 'official'
