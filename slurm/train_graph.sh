@@ -4,7 +4,7 @@
 ##SBATCH --nodes=1
 ##SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=240gb
+#SBATCH --mem=80gb
 #SBATCH --gpus=1
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=yawar.siddiqui@tum.de
@@ -15,4 +15,4 @@
 
 cd /rhome/ysiddiqui/CADTextures/
 
-python trainer/train_graphnet.py experiment=simple wandb_main=True
+python trainer/train_graphnet.py experiment=cube_max_globalnode wandb_main=True
