@@ -47,14 +47,14 @@ def from_scratch(file_all, file_input):
     mesh_data.edges = np.vstack((mesh_data.edges, mesh_data.edges[:, [1, 0]]))
 
     # global node
-    mesh_data.vs = np.vstack((mesh_data.vs, np.array([0, 0, 0]).reshape((1, 3))))
-    mesh_data.vs_features = np.vstack((mesh_data.vs_features, np.zeros_like(mesh_data.vs_features[0:1, :])))
-    mesh_data.input_colors = np.vstack((mesh_data.input_colors, np.zeros_like(mesh_data.input_colors[0:1, :])))
-    mesh_data.valid_colors = np.hstack((mesh_data.valid_colors, np.zeros_like(mesh_data.valid_colors[0:1])))
+    # mesh_data.vs = np.vstack((mesh_data.vs, np.array([0, 0, 0]).reshape((1, 3))))
+    # mesh_data.vs_features = np.vstack((mesh_data.vs_features, np.zeros_like(mesh_data.vs_features[0:1, :])))
+    # mesh_data.input_colors = np.vstack((mesh_data.input_colors, np.zeros_like(mesh_data.input_colors[0:1, :])))
+    # mesh_data.valid_colors = np.hstack((mesh_data.valid_colors, np.zeros_like(mesh_data.valid_colors[0:1])))
+    # global_edges = np.hstack((np.array(range(mesh_data.vs.shape[0] - 1)).reshape((-1, 1)), np.ones(mesh_data.vs.shape[0] - 1).reshape((-1, 1)) * (mesh_data.vs.shape[0] - 1))).astype(mesh_data.edges.dtype)
+    # global_edges = np.vstack((global_edges, global_edges[:, [1, 0]]))
+    # mesh_data.edges = np.vstack((mesh_data.edges, global_edges))
 
-    global_edges = np.hstack((np.array(range(mesh_data.vs.shape[0] - 1)).reshape((-1, 1)), np.ones(mesh_data.vs.shape[0] - 1).reshape((-1, 1)) * (mesh_data.vs.shape[0] - 1))).astype(mesh_data.edges.dtype)
-    global_edges = np.vstack((global_edges, global_edges[:, [1, 0]]))
-    mesh_data.edges = np.vstack((mesh_data.edges, global_edges))
     return mesh_data
 
 

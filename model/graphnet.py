@@ -2,105 +2,71 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GATConv, SAGEConv, GCNConv
-from torch_geometric.nn import TopKPooling, GCNConv
+from torch_geometric.nn import TopKPooling, GCNConv, BatchNorm, InstanceNorm, GraphNorm
+from torch_geometric.utils import add_self_loops, remove_self_loops, sort_edge_index
 from torch_geometric.utils.repeat import repeat
-from torch_geometric.nn.models.basic_gnn import GraphSAGE, GCN
+from torch_geometric.nn.models.basic_gnn import GraphSAGE, GCN, GIN, GAT
+from torch_sparse import spspmm
 
 
 class GATNet(nn.Module):
 
-    def __init__(self, in_channels, out_channels, nf, input_heads, intermediate_heads, output_heads, dropout):
+    def __init__(self, in_channels, out_channels, nf, dropout):
         super(GATNet, self).__init__()
 
-        self.gc1 = GATConv(in_channels, nf, heads=input_heads, dropout=dropout)
-        self.gc2 = GATConv(nf * input_heads, nf * 2, heads=intermediate_heads, dropout=dropout)
-        self.gc3 = GATConv(nf * 2 * intermediate_heads, nf * 4, heads=intermediate_heads, dropout=dropout)
-        self.gc4 = GATConv(nf * 4 * intermediate_heads, nf * 4, heads=intermediate_heads, dropout=dropout)
-        self.gc5 = GATConv(nf * 4 * intermediate_heads, nf * 4, heads=intermediate_heads, dropout=dropout)
-        self.gc6 = GATConv(nf * 4 * intermediate_heads, nf * 2, heads=intermediate_heads, dropout=dropout)
-        self.gc7 = GATConv(nf * 2 * intermediate_heads, out_channels, heads=output_heads, dropout=dropout)
-        self.dropout = dropout
+        self.gat_head = GAT(in_channels, nf, 5, nf, dropout, torch.nn.LeakyReLU(0.02), aggr='max', norm=nn.BatchNorm1d(nf))
+        self.gat_tail = GAT(nf * 3, nf, 2, out_channels, dropout, torch.nn.LeakyReLU(0.02), aggr='max', norm=nn.BatchNorm1d(nf))
+        self.skip = GAT(in_channels, nf, 1, nf, dropout, torch.nn.LeakyReLU(0.02), aggr='max', norm=nn.BatchNorm1d(nf))
+        self.global_head = GAT(in_channels, nf, 2, nf, dropout, torch.nn.LeakyReLU(0.02), aggr='max', norm=nn.BatchNorm1d(nf))
         self.tanh = torch.nn.Tanh()
 
     def reset_parameters(self):
-        self.gc1.reset_parameters()
-        self.gc2.reset_parameters()
-        self.gc3.reset_parameters()
-        self.gc4.reset_parameters()
-        self.gc5.reset_parameters()
-        self.gc6.reset_parameters()
-        self.gc7.reset_parameters()
+        self.gat.reset_parameters()
 
-    def forward(self, data):
-        x, edge_index = data.x, data.edge_index
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.gc1(x, edge_index)
-        x = F.leaky_relu(x, 0.02)
-
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.gc2(x, edge_index)
-        x = F.leaky_relu(x, 0.02)
-
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.gc3(x, edge_index)
-        x = F.leaky_relu(x, 0.02)
-
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.gc4(x, edge_index)
-        x = F.leaky_relu(x, 0.02)
-
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.gc5(x, edge_index)
-        x = F.leaky_relu(x, 0.02)
-
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.gc6(x, edge_index)
-        x = F.leaky_relu(x, 0.02)
-
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.gc7(x, edge_index)
-
-        return self.tanh(x) * 0.5
+    def forward(self, x, edge_index):
+        x_head = self.gat_head(x, edge_index)
+        x_skip = self.skip(x, edge_index)
+        x_global = self.global_head(x, edge_index).mean(dim=0).unsqueeze(0).expand((x_head.shape[0], -1))
+        x_out = self.gat_tail(torch.cat([x_head, x_skip, x_global], dim=1), edge_index)
+        return self.tanh(x_out) * 0.5
 
 
 class GraphSAGENet(nn.Module):
 
     def __init__(self, in_channels, out_channels, nf, dropout):
         super(GraphSAGENet, self).__init__()
-        self.sage = GraphSAGE(in_channels, nf, 9, out_channels, dropout, torch.nn.LeakyReLU(0.02), aggr='max')
+
+        self.sage_head = GraphSAGE(in_channels, nf, 7, out_channels, dropout, torch.nn.LeakyReLU(0.02), aggr='max', norm=InstanceNorm(nf))
         self.tanh = torch.nn.Tanh()
-        self.dropout = dropout
 
     def reset_parameters(self):
         self.sage.reset_parameters()
 
     def forward(self, x, edge_index):
-        x = self.sage(x, edge_index)
-        return self.tanh(x) * 0.5
+        x_out = self.sage_head(x, edge_index)
+        return self.tanh(x_out) * 0.5
 
 
 class GCNNet(nn.Module):
 
     def __init__(self, in_channels, out_channels, nf, dropout):
         super(GCNNet, self).__init__()
-        self.gcn = GCN(in_channels, nf, 7, dropout, torch.nn.LeakyReLU(0.02))
-        self.out = GCNConv(nf, out_channels)
+
+        self.gat_head = GCN(in_channels, nf, 5, nf, dropout, torch.nn.LeakyReLU(0.02), aggr='max', norm=InstanceNorm(nf))
+        self.gat_tail = GCN(nf * 3, nf, 2, out_channels, dropout, torch.nn.LeakyReLU(0.02), aggr='max', norm=InstanceNorm(nf))
+        self.skip = GCN(in_channels, nf, 1, nf, dropout, torch.nn.LeakyReLU(0.02), aggr='max', norm=InstanceNorm(nf))
+        self.global_head = GCN(in_channels, nf, 2, nf, dropout, torch.nn.LeakyReLU(0.02), aggr='max', norm=InstanceNorm(nf))
         self.tanh = torch.nn.Tanh()
-        self.dropout = dropout
 
     def reset_parameters(self):
-        self.gcn.reset_parameters()
-        self.out.reset_parameters()
+        self.gat.reset_parameters()
 
-    def forward(self, data):
-        x, edge_index = data.x, data.edge_index
-        x = self.gcn(x, edge_index)
-
-        x = F.leaky_relu(x, 0.02)
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.out(x, edge_index)
-
-        return self.tanh(x) * 0.5
+    def forward(self, x, edge_index):
+        x_head = self.gat_head(x, edge_index)
+        x_skip = self.skip(x, edge_index)
+        x_global = self.global_head(x, edge_index).mean(dim=0).unsqueeze(0).expand((x_head.shape[0], -1))
+        x_out = self.gat_tail(torch.cat([x_head, x_skip, x_global], dim=1), edge_index)
+        return self.tanh(x_out) * 0.5
 
 
 class GraphUNet(torch.nn.Module):
@@ -137,19 +103,17 @@ class GraphUNet(torch.nn.Module):
 
         self.down_convs = torch.nn.ModuleList()
         self.pools = torch.nn.ModuleList()
-        self.down_convs.append(SAGEConv(in_channels, channels, aggr='max'))
+        self.down_convs.append(GCNConv(in_channels, channels, improved=True))
         for i in range(depth):
             self.pools.append(TopKPooling(channels, self.pool_ratios[i]))
-            self.down_convs.append(SAGEConv(channels, channels, aggr='max'))
+            self.down_convs.append(GCNConv(channels, channels, improved=True))
 
         in_channels = channels if sum_res else 2 * channels
 
         self.up_convs = torch.nn.ModuleList()
         for i in range(depth - 1):
-            self.up_convs.append(SAGEConv(in_channels, channels, aggr='max'))
-        self.up_convs.append(SAGEConv(in_channels, out_channels, aggr='max'))
-
-        self.tanh = torch.nn.Tanh()
+            self.up_convs.append(GCNConv(in_channels, channels, improved=True))
+        self.up_convs.append(GCNConv(in_channels, out_channels, improved=True))
 
         self.reset_parameters()
 
@@ -167,7 +131,7 @@ class GraphUNet(torch.nn.Module):
             batch = edge_index.new_zeros(x.size(0))
         edge_weight = x.new_ones(edge_index.size(1))
 
-        x = self.down_convs[0](x, edge_index, edge_weight=edge_weight)
+        x = self.down_convs[0](x, edge_index, edge_weight)
         x = self.act(x)
 
         xs = [x]
@@ -176,10 +140,12 @@ class GraphUNet(torch.nn.Module):
         perms = []
 
         for i in range(1, self.depth + 1):
-            x, edge_index, edge_weight, batch, perm, _ = self.pools[i - 1](x, edge_index,
-                                                                           edge_weight, batch)
+            edge_index, edge_weight = self.augment_adj(edge_index, edge_weight,
+                                                       x.size(0))
+            x, edge_index, edge_weight, batch, perm, _ = self.pools[i - 1](
+                x, edge_index, edge_weight, batch)
 
-            x = self.down_convs[i](x, edge_index, edge_weight=edge_weight)
+            x = self.down_convs[i](x, edge_index, edge_weight)
             x = self.act(x)
 
             if i < self.depth:
@@ -200,10 +166,22 @@ class GraphUNet(torch.nn.Module):
             up[perm] = x
             x = res + up if self.sum_res else torch.cat((res, up), dim=-1)
 
-            x = self.up_convs[i](x, edge_index, edge_weight=edge_weight)
+            x = self.up_convs[i](x, edge_index, edge_weight)
             x = self.act(x) if i < self.depth - 1 else x
 
-        return self.tanh(x) * 0.5
+        return x
+
+    def augment_adj(self, edge_index, edge_weight, num_nodes):
+        edge_index, edge_weight = remove_self_loops(edge_index, edge_weight)
+        edge_index, edge_weight = add_self_loops(edge_index, edge_weight,
+                                                 num_nodes=num_nodes)
+        edge_index, edge_weight = sort_edge_index(edge_index, edge_weight,
+                                                  num_nodes)
+        edge_index, edge_weight = spspmm(edge_index.cpu(), edge_weight.cpu(), edge_index.cpu(),
+                                         edge_weight.cpu(), num_nodes, num_nodes,
+                                         num_nodes)
+        edge_index, edge_weight = remove_self_loops(edge_index.cuda(), edge_weight.cuda())
+        return edge_index, edge_weight
 
     def __repr__(self):
         return '{}({}, {}, {}, depth={}, pool_ratios={})'.format(

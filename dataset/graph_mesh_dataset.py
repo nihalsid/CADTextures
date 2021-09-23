@@ -82,7 +82,7 @@ class GraphMeshDataset(Dataset):
         embedder, embedder_out_dim = get_embedder_nerf(10, input_dims=3, i=0)
         nodes = embedder(torch.from_numpy(nodes)).numpy()
         mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1), vertex_features))).float(),
-                         # mesh_data = Data(x=torch.from_numpy(nodes).float(),
+                         # mesh_data = Data(x=torch.from_numpy(np.hstack((input_colors, valid_colors.reshape(-1, 1)))).float(),
                          # mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1)))).float(),
                          y=torch.from_numpy(target_colors).float(),
                          edge_index=torch.from_numpy(np.hstack([edges, edges[[1, 0], :]])).long(),

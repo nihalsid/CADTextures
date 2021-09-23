@@ -23,10 +23,9 @@ def GATNetTrainer(config, logger):
     device = torch.device('cuda:0')
 
     # instantiate model
-    # model = GATNet(3 + 3 + 1 + 6, 3, 16, 4, 8, 1, 0.0)
-    model = GraphSAGENet(63 + 3 + 1 + 6, 3, 128, 0)
-    # model = GraphUNet(3 + 3 + 1 + 6, 64, 3, 7, act=torch.nn.functional.leaky_relu)
-    # model = GCNNet(3 + 3 + 1 + 5, 3, 32, 0)
+    # model = GATNet(63 + 3 + 1 + 6, 3, 256, 0)
+    model = GraphSAGENet(63 + 3 + 1 + 6, 3, 256, 0)
+    # model = GCNNet(63 + 3 + 1 + 6, 3, 256, 0)
     print_model_parameter_count(model)
 
     # create dataloaders
@@ -54,6 +53,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
 
     # declare loss and move to specified device
     loss_criterion = RegressionLossHelper('l1')
+    l1_criterion = RegressionLossHelper('l1')
 
     # declare optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr, weight_decay=5e-4)
@@ -116,7 +116,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
                     prediction = model(sample_val.x, sample_val.edge_index)
                     prediction = prediction[:sample_val.y.shape[0], :]
 
-                loss_total_val += loss_criterion.calculate_loss(prediction, sample_val.y).mean().item()
+                loss_total_val += l1_criterion.calculate_loss(prediction, sample_val.y).mean().item()
 
             print(f'[{epoch:03d}] val_loss: {loss_total_val / len(valdataset):.3f}')
             logger.log_metrics({'loss_val': loss_total_val / len(valdataset)}, epoch * len(traindataset))
@@ -133,7 +133,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
 
                 valvisdataset.visualize_graph_with_predictions(sample_val, sample_val.y.cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'gt')
                 valvisdataset.visualize_graph_with_predictions(sample_val, prediction.cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'pred')
-                valvisdataset.visualize_graph_with_predictions(sample_val, sample_val.x[:, 3:6].cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'in')
+                valvisdataset.visualize_graph_with_predictions(sample_val, sample_val.x[:, -10:-7].cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'in')
 
             # set model back to train
             model.train()
