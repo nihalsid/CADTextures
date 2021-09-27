@@ -16,7 +16,7 @@ from util.embedder import get_embedder_nerf
 
 
 class GraphMeshDataset(Dataset):
-    def __init__(self, config, split, use_single_view, transform=None, pre_transform=None):
+    def __init__(self, config, split, use_single_view, transform=None, pre_transform=None, load_to_memory=False):
         splits_file = Path(config.dataset.data_dir) / 'splits' / config.dataset.name / config.dataset.splits_dir / f'{split}.txt'
         self.split_name = f'{config.dataset.splits_dir}_{split}'
         item_list = read_list(splits_file)
@@ -26,6 +26,12 @@ class GraphMeshDataset(Dataset):
             self.items = [(item, x, y) for item in item_list for x in range(225, 60, -45) for y in range(0, 360, 45)]
         # self.items = [x for i, x in enumerate(self.items) if i % config.n_proc == config.proc]
         super().__init__(Path(config.dataset.data_dir, config.dataset.name), transform, pre_transform)
+        self.memory = []
+        self.load_to_memory = False
+        if load_to_memory:
+            for i in tqdm(range(self.__len__()), 'load_to_mem'):
+                self.memory.append(self.__getitem__(i))
+            self.load_to_memory = True
 
     @staticmethod
     def item_to_name(item):
@@ -69,6 +75,8 @@ class GraphMeshDataset(Dataset):
         return len(unique_items)
 
     def get(self, idx):
+        if self.load_to_memory:
+            return self.memory[idx]
         unique_items = list(set([x[0] for x in self.items]))
         indexed_items = [x for x in self.items if x[0] == unique_items[idx]]
         selected_item = random.choice(indexed_items)
@@ -77,16 +85,19 @@ class GraphMeshDataset(Dataset):
 
     @staticmethod
     def read_mesh_data(path_all, path_input, x, y):
-        nodes, input_colors, valid_colors, target_colors, edges, edge_features, vertex_features = mesh_proc(str(path_all), str(path_input))
-        nodes = -1 + (nodes - nodes.min()) / (nodes.max() - nodes.min()) * 2
-        embedder, embedder_out_dim = get_embedder_nerf(10, input_dims=3, i=0)
-        nodes = embedder(torch.from_numpy(nodes)).numpy()
+        nodes, input_colors, valid_colors, target_colors, edges, edge_features, vertex_features, num_sub_vertices, sub_edges, pool_maps = mesh_proc(str(path_all), str(path_input))
+        # nodes = -1 + (nodes - nodes.min()) / (nodes.max() - nodes.min()) * 2
+        # embedder, embedder_out_dim = get_embedder_nerf(10, input_dims=3, i=0)
+        # nodes = embedder(torch.from_numpy(nodes)).numpy()
         mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1), vertex_features))).float(),
                          # mesh_data = Data(x=torch.from_numpy(np.hstack((input_colors, valid_colors.reshape(-1, 1)))).float(),
                          # mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1)))).float(),
                          y=torch.from_numpy(target_colors).float(),
                          edge_index=torch.from_numpy(np.hstack([edges, edges[[1, 0], :]])).long(),
                          edge_attr=torch.from_numpy(np.vstack([edge_features, edge_features])).float(),
+                         num_sub_vertices=torch.from_numpy(np.array(num_sub_vertices)).long(),
+                         sub_edges=[torch.from_numpy(x).long() for x in sub_edges],
+                         pool_maps=[torch.from_numpy(x).long() for x in pool_maps],
                          name=f"{path_all.parent.name}_{x:03d}_{y:03d}")
         return mesh_data
 

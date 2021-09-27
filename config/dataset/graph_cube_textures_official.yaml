@@ -3,3 +3,4 @@ name: 'SingleShape/CubeTexturesForGraph'
 single_view: False
 data_dir: 'data'
 splits_dir: 'official'
+memory: False

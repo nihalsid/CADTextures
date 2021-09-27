@@ -1,30 +1,42 @@
+from pathlib import Path
+
 import numpy as np
 import torch
 import torch_scatter
 import trimesh
+from scipy.spatial import distance
 
 
 def mesh_proc(file_all, file_input):
     mesh_data = from_scratch(file_all, file_input)
     return mesh_data['vs'], mesh_data['input_colors'], mesh_data['valid_colors'], mesh_data['target_colors'], \
-           mesh_data['edges'].T, mesh_data['features'].T, mesh_data['vs_features']
+           mesh_data['edges'].T, mesh_data['features'].T, mesh_data['vs_features'], mesh_data['num_sub_vertices'], \
+           mesh_data['sub_edges'], mesh_data['pool_maps']
+
+
+class MeshPrep:
+    def __getitem__(self, item):
+        return eval('self.' + item)
+
+    @staticmethod
+    def create_mesh_data():
+        mesh_data = MeshPrep()
+        mesh_data.vs = mesh_data.edges = None
+        mesh_data.gemm_edges = mesh_data.sides = None
+        mesh_data.edges_count = None
+        mesh_data.ve = None
+        mesh_data.v_mask = None
+        mesh_data.filename = 'unknown'
+        mesh_data.edge_lengths = None
+        mesh_data.edge_areas = []
+        mesh_data.num_sub_vertices = []
+        mesh_data.sub_edges = []
+        mesh_data.pool_maps = []
+        return mesh_data
 
 
 def from_scratch(file_all, file_input):
-    class MeshPrep:
-        def __getitem__(self, item):
-            return eval('self.' + item)
-
-    mesh_data = MeshPrep()
-    mesh_data.vs = mesh_data.edges = None
-    mesh_data.gemm_edges = mesh_data.sides = None
-    mesh_data.edges_count = None
-    mesh_data.ve = None
-    mesh_data.v_mask = None
-    mesh_data.filename = 'unknown'
-    mesh_data.edge_lengths = None
-    mesh_data.edge_areas = []
-
+    mesh_data = MeshPrep.create_mesh_data()
     mesh = trimesh.load(file_all, force='mesh', process=False)
     mesh_input = trimesh.load(file_input, force='mesh', process=False)
     mesh_data.target_colors = (mesh.visual.vertex_colors[:, :3] / 255).astype(np.float32) - 0.5
@@ -43,8 +55,10 @@ def from_scratch(file_all, file_input):
     # mesh_data.vs_features = torch.zeros((mesh_data.vs.shape[0], cat_feats.shape[1])).float()
     # torch_scatter.scatter_mean(cat_feats, cat_idx, dim=0, out=mesh_data.vs_features)
     # mesh_data.vs_features = mesh_data.vs_features.numpy()
+
     mesh_data.vs_features = np.hstack((mesh_input.vertex_normals, get_laplacian_coordinates(mesh_input)))
     mesh_data.edges = np.vstack((mesh_data.edges, mesh_data.edges[:, [1, 0]]))
+    mesh_data.num_sub_vertices, mesh_data.sub_edges, mesh_data.pool_maps = process_pool_mapping(mesh_data.vs, Path(file_all).parent)
 
     # global node
     # mesh_data.vs = np.vstack((mesh_data.vs, np.array([0, 0, 0]).reshape((1, 3))))
@@ -54,8 +68,31 @@ def from_scratch(file_all, file_input):
     # global_edges = np.hstack((np.array(range(mesh_data.vs.shape[0] - 1)).reshape((-1, 1)), np.ones(mesh_data.vs.shape[0] - 1).reshape((-1, 1)) * (mesh_data.vs.shape[0] - 1))).astype(mesh_data.edges.dtype)
     # global_edges = np.vstack((global_edges, global_edges[:, [1, 0]]))
     # mesh_data.edges = np.vstack((mesh_data.edges, global_edges))
-
     return mesh_data
+
+
+def process_pool_mapping(original_mesh_vs, base_dir):
+    decimated_paths = [x for x in Path(base_dir).iterdir() if x.name.startswith('decimate') and x.name.endswith('.obj')]
+    decimated_vertices = [original_mesh_vs]
+    decimated_edges = []
+    for i in range(len(decimated_paths)):
+        mesh_data = MeshPrep.create_mesh_data()
+        mesh = trimesh.load(Path(base_dir) / f"decimate_{i + 1}.obj", force='mesh', process=False)
+        mesh_data.vs = mesh.vertices
+        faces = mesh.faces
+        mesh_data.v_mask = np.ones(len(mesh_data.vs), dtype=bool)
+        faces, face_areas = remove_non_manifolds(mesh_data, faces)
+        build_gemm(mesh_data, faces, face_areas)
+        mesh_data.edges = np.vstack((mesh_data.edges, mesh_data.edges[:, [1, 0]]))
+        decimated_vertices.append(mesh_data.vs)
+        decimated_edges.append(mesh_data.edges.T)
+
+    pool_down_locations = []
+    for i in range(1, len(decimated_vertices)):
+        # find mapping from (i - 1) to i and i to (i - 1)
+        distance_matrix = distance.cdist(decimated_vertices[i - 1], decimated_vertices[i])
+        pool_down_locations.append(np.argmin(distance_matrix, axis=1))
+    return [x.shape[0] for x in decimated_vertices[1:]], decimated_edges, pool_down_locations
 
 
 def get_laplacian_coordinates(mesh):

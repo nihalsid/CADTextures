@@ -13,7 +13,7 @@ resume: null
 
 batch_size: 8
 num_workers: 8
-lr: 0.0002
+lr: 0.0001
 
 proc: 0
 n_proc: 1

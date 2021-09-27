@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from dataset.graph_mesh_dataset import GraphMeshDataset
 import torch
-from model.graphnet import GATNet, GraphSAGENet, GCNNet, GraphUNet
+from model.graphnet import GATNet, GraphSAGENet, GCNNet, GraphUNet, GraphSAGEEncoderDecoder
 from util.misc import print_model_parameter_count
 from util.regression_loss import RegressionLossHelper
 
@@ -24,12 +24,15 @@ def GATNetTrainer(config, logger):
 
     # instantiate model
     # model = GATNet(63 + 3 + 1 + 6, 3, 256, 0)
-    model = GraphSAGENet(63 + 3 + 1 + 6, 3, 256, 0)
+    # model = GraphSAGENet(3 + 3 + 1 + 6, 3, 256, 0)
+    model = GraphSAGEEncoderDecoder(3 + 3 + 1 + 6, 3, 64)
     # model = GCNNet(63 + 3 + 1 + 6, 3, 256, 0)
+    wandb.watch(model, log='all')
+
     print_model_parameter_count(model)
 
     # create dataloaders
-    trainset = GraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view)
+    trainset = GraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
 
     valset = GraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view)
 
@@ -56,7 +59,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
     l1_criterion = RegressionLossHelper('l1')
 
     # declare optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr, weight_decay=5e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
 
     # set model to train, important if your network has e.g. dropout or batchnorm layers
     model.train()
@@ -78,7 +81,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
             optimizer.zero_grad()
 
             # forward pass
-            prediction = model(sample.x, sample.edge_index)
+            prediction = model(sample.x, sample.edge_index, sample.num_sub_vertices, sample.pool_maps, sample.sub_edges)
 
             # compute loss
             loss_total = loss_criterion.calculate_loss(prediction[:sample.y.shape[0], :], sample.y).mean(dim=1).mean()
@@ -113,7 +116,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
                 sample_val = sample_val.to(device)
 
                 with torch.no_grad():
-                    prediction = model(sample_val.x, sample_val.edge_index)
+                    prediction = model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.sub_edges)
                     prediction = prediction[:sample_val.y.shape[0], :]
 
                 loss_total_val += l1_criterion.calculate_loss(prediction, sample_val.y).mean().item()
@@ -128,7 +131,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
                 sample_val = sample_val.to(device)
 
                 with torch.no_grad():
-                    prediction = model(sample_val.x, sample_val.edge_index)
+                    prediction = model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.sub_edges)
                     prediction = prediction[:sample_val.y.shape[0], :]
 
                 valvisdataset.visualize_graph_with_predictions(sample_val, sample_val.y.cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'gt')
