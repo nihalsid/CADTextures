@@ -8,8 +8,8 @@
 #SBATCH --gpus=4
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=yawar.siddiqui@tum.de
-##SBATCH --exclude=char,pegasus,tarsonis
-#SBATCH --exclude=char,pegasus,tarsonis,gondor,moria,seti,sorona,umoja,lothlann
+##SBATCH --exclude=char,pegasus,tarsonis,gondor,moria,seti,sorona,umoja,lothlann
+#SBATCH --exclude=char,pegasus,tarsonis
 #SBATCH --partition=debug
 #SBATCH --qos=normal
 
