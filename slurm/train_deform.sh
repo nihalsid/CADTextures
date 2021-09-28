@@ -15,4 +15,4 @@
 
 cd /rhome/ysiddiqui/CADTextures/
 
-python trainer/train_multilevel_attn.py sanity_steps=1 dataset=single_cube_textures dataset.preload=False experiment=$REXPERIMENT wandb_main=True
+python trainer/train_regression.py sanity_steps=1 dataset=single_cube_textures dataset.preload=False experiment=$REXPERIMENT wandb_main=True

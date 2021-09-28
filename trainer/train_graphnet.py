@@ -27,7 +27,7 @@ def GATNetTrainer(config, logger):
     # model = GraphSAGENet(3 + 3 + 1 + 6, 3, 256, 0)
     model = GraphSAGEEncoderDecoder(3 + 3 + 1 + 6, 3, 64)
     # model = GCNNet(63 + 3 + 1 + 6, 3, 256, 0)
-    wandb.watch(model, log='all')
+    # wandb.watch(model, log='all')
 
     print_model_parameter_count(model)
 

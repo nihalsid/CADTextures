@@ -12,7 +12,7 @@ from pytorch_lightning.utilities import rank_zero_only
 
 from dataset.texture_end2end_dataset import TextureEnd2EndDataset
 from dataset.texture_map_dataset import TextureMapDataset
-from model.diffusion_model import Decoder, DeformableEncoder, Encoder
+from model.diffusion_model import Decoder, DeformableEncoder, Encoder, EncoderReduced, DecoderReduced
 from trainer.train_texture_map_predictor import TextureMapPredictorModule
 from util.feature_loss import FeatureLossHelper
 from util.regression_loss import RegressionLossHelper
@@ -25,14 +25,14 @@ class TextureRegressionModule(pl.LightningModule):
         self.save_hyperparameters(config)
         self.preload_dict = {}
         assert config.dataset.texture_map_size == 128, "only 128x128 texture map supported"
-        encoder = lambda in_channels, z_channels: Encoder(ch=128, out_ch=3, ch_mult=(1, 1, 2, 2, 4), num_res_blocks=2, attn_resolutions=[8], dropout=0.0, resamp_with_conv=True, in_channels=in_channels, resolution=128, z_channels=z_channels, use_unfold=False, double_z=False)
+        encoder = lambda in_channels, z_channels: EncoderReduced(ch=128, out_ch=3, ch_mult=(1, 1, 2, 2, 4), num_res_blocks=2, attn_resolutions=[8], dropout=0.0, resamp_with_conv=True, in_channels=in_channels, resolution=128, z_channels=z_channels, use_unfold=False, double_z=False)
         self.fenc_input = encoder(4, config.fenc_zdim)
         self.regression_loss = RegressionLossHelper(self.hparams.regression_loss_type)
         self.feature_loss_helper = FeatureLossHelper(['relu4_2'], ['relu3_2', 'relu4_2'], 'lab')
         self.mse_loss = torch.nn.MSELoss(reduction='mean')
         self.dataset = lambda split: TextureEnd2EndDataset(config, split, self.preload_dict)
         self.train_dataset = self.dataset('train')
-        self.decoder = Decoder(ch=128, out_ch=3, ch_mult=(1, 1, 2, 2, 4), num_res_blocks=2, attn_resolutions=[8], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=128, z_channels=config.fenc_zdim, double_z=False)
+        self.decoder = DecoderReduced(ch=128, out_ch=3, ch_mult=(1, 1, 2, 2, 4), num_res_blocks=2, attn_resolutions=[8], dropout=0.0, resamp_with_conv=True, in_channels=3, resolution=128, z_channels=config.fenc_zdim, double_z=False)
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(list(self.fenc_input.parameters()) + list(self.decoder.parameters()), lr=self.hparams.lr, betas=(0.5, 0.9))
@@ -64,14 +64,15 @@ class TextureRegressionModule(pl.LightningModule):
         refined_texture_l, refined_texture_ab = TextureMapPredictorModule.split_into_channels(refinement)
         loss_regression_ref_l = self.regression_loss.calculate_loss(gt_texture_l, refined_texture_l).mean()
         loss_regression_ref_ab = self.regression_loss.calculate_loss(gt_texture_ab, refined_texture_ab).mean()
-        loss_content_ref = self.feature_loss_helper.calculate_feature_loss(batch['texture'], refinement).mean()
-        style_loss_maps = self.feature_loss_helper.calculate_style_loss(batch['texture'], refinement)
-        loss_style_ref = style_loss_maps[0].mean() + style_loss_maps[1].mean()
+        # loss_content_ref = self.feature_loss_helper.calculate_feature_loss(batch['texture'], refinement).mean()
+        # style_loss_maps = self.feature_loss_helper.calculate_style_loss(batch['texture'], refinement)
+        # loss_style_ref = style_loss_maps[0].mean() + style_loss_maps[1].mean()
         self.log("train/loss_regression_ref_l", loss_regression_ref_l * self.hparams.lambda_regr_l, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
         self.log("train/loss_regression_ref_ab", loss_regression_ref_ab * self.hparams.lambda_regr_ab, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
-        self.log("train/loss_style_ref", loss_style_ref * self.hparams.lambda_style, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
-        self.log("train/loss_content_ref", loss_content_ref * self.hparams.lambda_content, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
-        loss_total = loss_total + (loss_regression_ref_l * self.hparams.lambda_regr_l + loss_regression_ref_ab * self.hparams.lambda_regr_ab + loss_content_ref * self.hparams.lambda_content + loss_style_ref * self.hparams.lambda_style / 25)
+        # self.log("train/loss_style_ref", loss_style_ref * self.hparams.lambda_style, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
+        # self.log("train/loss_content_ref", loss_content_ref * self.hparams.lambda_content, on_step=True, on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
+        # loss_total = loss_total + (loss_regression_ref_l * self.hparams.lambda_regr_l + loss_regression_ref_ab * self.hparams.lambda_regr_ab + loss_content_ref * self.hparams.lambda_content + loss_style_ref * self.hparams.lambda_style / 25)
+        loss_total = loss_total + (loss_regression_ref_l * self.hparams.lambda_regr_l + loss_regression_ref_ab * self.hparams.lambda_regr_ab)
         return loss_total
 
     def validation_step(self, batch, batch_idx):
@@ -128,7 +129,7 @@ def main(config):
     logger = WandbLogger(project=f'End2End{config.suffix}[{ds_name}]', name=config.experiment, id=config.experiment, settings=wandb.Settings(start_method='fork'))
     checkpoint_callback = ModelCheckpoint(dirpath=(Path("runs") / config.experiment), filename='_ckpt_{epoch}', save_top_k=-1, verbose=False, every_n_epochs=config.save_epoch)
     model = TextureRegressionModule(config)
-    trainer = Trainer(gpus=-1, accelerator='ddp', plugins=DDPPlugin(find_unused_parameters=True), num_sanity_val_steps=config.sanity_steps, max_epochs=config.max_epoch, limit_val_batches=config.val_check_percent,
+    trainer = Trainer(gpus=-1, accelerator='ddp', plugins=DDPPlugin(find_unused_parameters=False), num_sanity_val_steps=config.sanity_steps, max_epochs=config.max_epoch, limit_val_batches=config.val_check_percent,
                       callbacks=[checkpoint_callback],
                       val_check_interval=float(min(config.val_check_interval, 1)), check_val_every_n_epoch=max(1, config.val_check_interval), resume_from_checkpoint=config.resume, logger=logger, benchmark=True)
     trainer.fit(model)
