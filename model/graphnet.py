@@ -10,6 +10,20 @@ from torch_geometric.nn.models.basic_gnn import GraphSAGE, GCN, GIN, GAT
 from torch_sparse import spspmm
 
 
+def pool(x, node_count, pool_map, pool_op='max'):
+    x_pooled = torch.zeros((node_count, x.shape[1]), dtype=x.dtype).to(x.device)
+    if pool_op == 'max':
+        torch_scatter.scatter_max(x, pool_map, dim=0, out=x_pooled)
+    elif pool_op == 'mean':
+        torch_scatter.scatter_mean(x, pool_map, dim=0, out=x_pooled)
+    return x_pooled
+
+
+def unpool(x, pool_map):
+    x_unpooled = x[pool_map, :]
+    return x_unpooled
+
+
 class GATNet(nn.Module):
 
     def __init__(self, in_channels, out_channels, nf, dropout):
@@ -130,44 +144,191 @@ class GraphSAGEEncoderDecoder(nn.Module):
 
     def forward(self, x, edge_index, node_counts, pool_maps, sub_edges):
         x_0 = self.layer_0_e(x, edge_index)
-        x_0 = self.pool(x_0, node_counts[0], pool_maps[0])
+        x_0 = pool(x_0, node_counts[0], pool_maps[0])
 
         x_1 = self.layer_1_e(x_0, sub_edges[0])
-        x_1 = self.pool(x_1, node_counts[1], pool_maps[1])
+        x_1 = pool(x_1, node_counts[1], pool_maps[1])
 
         x_2 = self.layer_2_e(x_1, sub_edges[1])
-        x_2 = self.pool(x_2, node_counts[2], pool_maps[2])
+        x_2 = pool(x_2, node_counts[2], pool_maps[2])
 
         x_3 = self.layer_3_e(x_2, sub_edges[2])
-        x_3 = self.pool(x_3, node_counts[3], pool_maps[3])
+        x_3 = pool(x_3, node_counts[3], pool_maps[3])
 
         x_4 = self.layer_4(x_3, sub_edges[3])
-        x_4 = self.unpool(x_4, pool_maps[3])
+        x_4 = unpool(x_4, pool_maps[3])
 
         x_3 = self.layer_3_d(x_4, sub_edges[2])
-        x_3 = self.unpool(x_3, pool_maps[2])
+        x_3 = unpool(x_3, pool_maps[2])
 
         x_2 = self.layer_2_d(x_3, sub_edges[1])
-        x_2 = self.unpool(x_2, pool_maps[1])
+        x_2 = unpool(x_2, pool_maps[1])
 
         x_1 = self.layer_1_d(x_2, sub_edges[0])
-        x_1 = self.unpool(x_1, pool_maps[0])
+        x_1 = unpool(x_1, pool_maps[0])
 
         x_0 = self.layer_0_d(x_1, edge_index)
         x_out = self.layer_out(x_0)
 
         return self.tanh(x_out) * 0.5
 
-    @staticmethod
-    def pool(x, node_count, pool_map):
-        x_pooled = torch.zeros((node_count, x.shape[1]), dtype=x.dtype).to(x.device)
-        torch_scatter.scatter_max(x, pool_map, dim=0, out=x_pooled)
-        return x_pooled
 
-    @staticmethod
-    def unpool(x, pool_map):
-        x_unpooled = x[pool_map, :]
-        return x_unpooled
+def swish(x):
+    # swish
+    return x*torch.sigmoid(x)
+
+
+class GResNetBlock(nn.Module):
+
+    def __init__(self, nf_in, nf_out, norm, activation, aggr):
+        super().__init__()
+        self.nf_in = nf_in
+        self.nf_out = nf_out
+        self.norm_0 = norm(nf_in)
+        self.conv_0 = SAGEConv(nf_in, nf_out, aggr=aggr)
+        self.norm_1 = norm(nf_out)
+        self.conv_1 = SAGEConv(nf_out, nf_out, aggr=aggr)
+        self.activation = activation
+        if nf_in != nf_out:
+            self.nin_shortcut = nn.Linear(nf_in, nf_out)
+
+    def forward(self, x, edge_index):
+        h = x
+        h = self.norm_0(h)
+        h = self.activation(h)
+        h = self.conv_0(h, edge_index)
+
+        h = self.norm_1(h)
+        h = self.activation(h)
+        h = self.conv_1(h, edge_index)
+
+        if self.nf_in != self.nf_out:
+            x = self.nin_shortcut(x)
+
+        return x + h
+
+
+class BigGraphSAGEEncoderDecoder(nn.Module):
+
+    def __init__(self, in_channels, out_channels, nf, aggr):
+        super().__init__()
+        norm = GraphNorm
+        self.activation = nn.LeakyReLU(0.02)
+        self.enc_conv_in = SAGEConv(in_channels, nf, aggr=aggr)
+
+        self.down_0_block_0 = GResNetBlock(nf, nf, norm, self.activation, aggr)
+        self.down_0_block_1 = GResNetBlock(nf, nf, norm, self.activation, aggr)
+
+        self.down_1_block_0 = GResNetBlock(nf, nf, norm, self.activation, aggr)
+        self.down_1_block_1 = GResNetBlock(nf, nf, norm, self.activation, aggr)
+
+        self.down_2_block_0 = GResNetBlock(nf, nf * 2, norm, self.activation, aggr)
+        self.down_2_block_1 = GResNetBlock(nf * 2, nf * 2, norm, self.activation, aggr)
+
+        self.down_3_block_0 = GResNetBlock(nf * 2, nf * 2, norm, self.activation, aggr)
+        self.down_3_block_1 = GResNetBlock(nf * 2, nf * 2, norm, self.activation, aggr)
+
+        self.down_4_block_0 = GResNetBlock(nf * 2, nf * 4, norm, self.activation, aggr)
+        self.down_4_block_1 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
+
+        self.enc_mid_block_0 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
+        self.enc_mid_block_1 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
+
+        self.enc_out_conv = SAGEConv(nf * 4, nf * 2, aggr=aggr)
+        self.enc_out_norm = norm(nf * 4)
+
+        self.dec_conv_in = SAGEConv(nf * 2, nf * 4, aggr=aggr)
+
+        self.dec_mid_block_0 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
+        self.dec_mid_block_1 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
+
+        self.up_0_block_0 = GResNetBlock(nf, nf, norm, self.activation, aggr)
+        self.up_0_block_1 = GResNetBlock(nf, nf, norm, self.activation, aggr)
+        self.up_0_block_2 = GResNetBlock(nf, nf, norm, self.activation, aggr)
+
+        self.up_1_block_0 = GResNetBlock(nf * 2, nf, norm, self.activation, aggr)
+        self.up_1_block_1 = GResNetBlock(nf, nf, norm, self.activation, aggr)
+        self.up_1_block_2 = GResNetBlock(nf, nf, norm, self.activation, aggr)
+
+        self.up_2_block_0 = GResNetBlock(nf * 2, nf * 2, norm, self.activation, aggr)
+        self.up_2_block_1 = GResNetBlock(nf * 2, nf * 2, norm, self.activation, aggr)
+        self.up_2_block_2 = GResNetBlock(nf * 2, nf * 2, norm, self.activation, aggr)
+
+        self.up_3_block_0 = GResNetBlock(nf * 4, nf * 2, norm, self.activation, aggr)
+        self.up_3_block_1 = GResNetBlock(nf * 2, nf * 2, norm, self.activation, aggr)
+        self.up_3_block_2 = GResNetBlock(nf * 2, nf * 2, norm, self.activation, aggr)
+
+        self.up_4_block_0 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
+        self.up_4_block_1 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
+        self.up_4_block_2 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
+
+        self.dec_out_norm = norm(nf)
+        self.dec_out_conv = SAGEConv(nf, out_channels)
+        self.tanh = nn.Tanh()
+
+    def forward(self, x, edge_index, node_counts, pool_maps, sub_edges):
+
+        x = self.enc_conv_in(x, edge_index)
+        x = self.down_0_block_0(x, edge_index)
+        x = self.down_0_block_1(x, edge_index)
+        x = pool(x, node_counts[0], pool_maps[0], pool_op='max')
+
+        x = self.down_1_block_0(x, sub_edges[0])
+        x = self.down_1_block_1(x, sub_edges[0])
+
+        x = self.down_2_block_0(x, sub_edges[0])
+        x = self.down_2_block_1(x, sub_edges[0])
+        x = pool(x, node_counts[1], pool_maps[1], pool_op='max')
+
+        x = self.down_3_block_0(x, sub_edges[1])
+        x = self.down_3_block_1(x, sub_edges[1])
+        x = pool(x, node_counts[2], pool_maps[2], pool_op='max')
+
+        x = self.down_4_block_0(x, sub_edges[2])
+        x = self.down_4_block_1(x, sub_edges[2])
+        x = pool(x, node_counts[3], pool_maps[3], pool_op='max')
+
+        x = self.enc_mid_block_0(x, sub_edges[3])
+        x = self.enc_mid_block_1(x, sub_edges[3])
+
+        x = self.enc_out_norm(x)
+        x = self.activation(x)
+        x = self.enc_out_conv(x, sub_edges[3])
+
+        x = self.dec_conv_in(x, sub_edges[3])
+
+        x = self.dec_mid_block_0(x, sub_edges[3])
+        x = self.dec_mid_block_1(x, sub_edges[3])
+
+        x = self.up_4_block_0(x, sub_edges[3])
+        x = self.up_4_block_1(x, sub_edges[3])
+        x = self.up_4_block_2(x, sub_edges[3])
+        x = unpool(x, pool_maps[3])
+
+        x = self.up_3_block_0(x, sub_edges[2])
+        x = self.up_3_block_1(x, sub_edges[2])
+        x = self.up_3_block_2(x, sub_edges[2])
+        x = unpool(x, pool_maps[2])
+
+        x = self.up_2_block_0(x, sub_edges[1])
+        x = self.up_2_block_1(x, sub_edges[1])
+        x = self.up_2_block_2(x, sub_edges[1])
+        x = unpool(x, pool_maps[1])
+
+        x = self.up_1_block_0(x, sub_edges[0])
+        x = self.up_1_block_1(x, sub_edges[0])
+        x = self.up_1_block_2(x, sub_edges[0])
+        x = unpool(x, pool_maps[0])
+
+        x = self.up_0_block_0(x, edge_index)
+        x = self.up_0_block_1(x, edge_index)
+        x = self.up_0_block_2(x, edge_index)
+
+        x = self.dec_out_norm(x)
+        x = self.activation(x)
+        x = self.dec_out_conv(x, edge_index)
+
+        return self.tanh(x) * 0.5
 
 
 class GCNNet(nn.Module):

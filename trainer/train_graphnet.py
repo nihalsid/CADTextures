@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from dataset.graph_mesh_dataset import GraphMeshDataset
 import torch
-from model.graphnet import GATNet, GraphSAGENet, GCNNet, GraphUNet, GraphSAGEEncoderDecoder
+from model.graphnet import GATNet, GraphSAGENet, GCNNet, GraphUNet, GraphSAGEEncoderDecoder, BigGraphSAGEEncoderDecoder
 from util.misc import print_model_parameter_count
 from util.regression_loss import RegressionLossHelper
 
@@ -25,7 +25,8 @@ def GATNetTrainer(config, logger):
     # instantiate model
     # model = GATNet(63 + 3 + 1 + 6, 3, 256, 0)
     # model = GraphSAGENet(3 + 3 + 1 + 6, 3, 256, 0)
-    model = GraphSAGEEncoderDecoder(3 + 3 + 1 + 6, 3, 64)
+    # model = GraphSAGEEncoderDecoder(3 + 3 + 1 + 6, 3, 64)
+    model = BigGraphSAGEEncoderDecoder(3 + 3 + 1 + 6, 3, 128, 'max')
     # model = GCNNet(63 + 3 + 1 + 6, 3, 256, 0)
     # wandb.watch(model, log='all')
 
