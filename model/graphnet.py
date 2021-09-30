@@ -208,6 +208,41 @@ class GResNetBlock(nn.Module):
         return x + h
 
 
+class GAttnBlock(nn.Module):
+
+    def __init__(self, nf, norm):
+        super().__init__()
+        self.in_channels = nf
+        self.norm = norm(nf)
+        self.q = nn.Linear(nf, nf)
+        self.k = nn.Linear(nf, nf)
+        self.v = nn.Linear(nf, nf)
+        self.proj_out = nn.Linear(nf, nf)
+
+    def forward(self, x):
+        h_ = x
+        h_ = self.norm(h_)
+        q = self.q(h_)
+        k = self.k(h_)
+        v = self.v(h_)
+
+        N, c = q.shape
+
+        q = q.unsqueeze(0)  # 1, N, c
+        k = k.t().unsqueeze(0)  # 1, c, N
+        w_ = torch.bmm(q, k)  # b,N,N    w[b,i,j]=sum_c q[b,i,c]k[b,c,j]
+        w_ = w_ * (int(c) ** (-0.5))
+        w_ = torch.nn.functional.softmax(w_, dim=2)
+
+        v = v.t().unsqueeze(0)  #1, c, N
+        w_ = w_.permute(0, 2, 1)  # 1, N, N (first hw of k, second of q)
+        h_ = torch.bmm(v, w_)  # 1, c, N (hw of q) h_[b,c,j] = sum_i v[b,c,i] w_[b,i,j]
+        h_ = h_.squeeze(0).permute((1, 0))
+        h_ = self.proj_out(h_)
+
+        return x + h_
+
+
 class BigGraphSAGEEncoderDecoder(nn.Module):
 
     def __init__(self, in_channels, out_channels, nf, aggr):
@@ -230,8 +265,11 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
 
         self.down_4_block_0 = GResNetBlock(nf * 2, nf * 4, norm, self.activation, aggr)
         self.down_4_block_1 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
+        self.down_4_attn_block_0 = GAttnBlock(nf * 4, norm)
+        self.down_4_attn_block_1 = GAttnBlock(nf * 4, norm)
 
         self.enc_mid_block_0 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
+        self.enc_mid_attn_0 = GAttnBlock(nf * 4, norm)
         self.enc_mid_block_1 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
 
         self.enc_out_conv = SAGEConv(nf * 4, nf * 2, aggr=aggr)
@@ -240,6 +278,7 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
         self.dec_conv_in = SAGEConv(nf * 2, nf * 4, aggr=aggr)
 
         self.dec_mid_block_0 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
+        self.dec_mid_attn_0 = GAttnBlock(nf * 4, norm)
         self.dec_mid_block_1 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
 
         self.up_0_block_0 = GResNetBlock(nf, nf, norm, self.activation, aggr)
@@ -261,6 +300,9 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
         self.up_4_block_0 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
         self.up_4_block_1 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
         self.up_4_block_2 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
+        self.up_4_attn_block_0 = GAttnBlock(nf * 4, norm)
+        self.up_4_attn_block_1 = GAttnBlock(nf * 4, norm)
+        self.up_4_attn_block_2 = GAttnBlock(nf * 4, norm)
 
         self.dec_out_norm = norm(nf)
         self.dec_out_conv = SAGEConv(nf, out_channels)
@@ -285,10 +327,13 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
         x = pool(x, node_counts[2], pool_maps[2], pool_op='max')
 
         x = self.down_4_block_0(x, sub_edges[2])
+        x = self.down_4_attn_block_0(x)
         x = self.down_4_block_1(x, sub_edges[2])
+        x = self.down_4_attn_block_1(x)
         x = pool(x, node_counts[3], pool_maps[3], pool_op='max')
 
         x = self.enc_mid_block_0(x, sub_edges[3])
+        x = self.enc_mid_attn_0(x)
         x = self.enc_mid_block_1(x, sub_edges[3])
 
         x = self.enc_out_norm(x)
@@ -298,11 +343,15 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
         x = self.dec_conv_in(x, sub_edges[3])
 
         x = self.dec_mid_block_0(x, sub_edges[3])
+        x = self.dec_mid_attn_0(x)
         x = self.dec_mid_block_1(x, sub_edges[3])
 
         x = self.up_4_block_0(x, sub_edges[3])
+        x = self.up_4_attn_block_0(x)
         x = self.up_4_block_1(x, sub_edges[3])
+        x = self.up_4_attn_block_1(x)
         x = self.up_4_block_2(x, sub_edges[3])
+        x = self.up_4_attn_block_2(x)
         x = unpool(x, pool_maps[3])
 
         x = self.up_3_block_0(x, sub_edges[2])
