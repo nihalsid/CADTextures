@@ -265,11 +265,11 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
 
         self.down_4_block_0 = GResNetBlock(nf * 2, nf * 4, norm, self.activation, aggr)
         self.down_4_block_1 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
-        self.down_4_attn_block_0 = GAttnBlock(nf * 4, norm)
-        self.down_4_attn_block_1 = GAttnBlock(nf * 4, norm)
+        # self.down_4_attn_block_0 = GAttnBlock(nf * 4, norm)
+        # self.down_4_attn_block_1 = GAttnBlock(nf * 4, norm)
 
         self.enc_mid_block_0 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
-        self.enc_mid_attn_0 = GAttnBlock(nf * 4, norm)
+        # self.enc_mid_attn_0 = GAttnBlock(nf * 4, norm)
         self.enc_mid_block_1 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
 
         self.enc_out_conv = SAGEConv(nf * 4, nf * 2, aggr=aggr)
@@ -278,62 +278,62 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
         self.dec_conv_in = SAGEConv(nf * 2, nf * 4, aggr=aggr)
 
         self.dec_mid_block_0 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
-        self.dec_mid_attn_0 = GAttnBlock(nf * 4, norm)
+        # self.dec_mid_attn_0 = GAttnBlock(nf * 4, norm)
         self.dec_mid_block_1 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
 
-        self.up_0_block_0 = GResNetBlock(nf, nf, norm, self.activation, aggr)
+        self.up_0_block_0 = GResNetBlock(nf + nf, nf, norm, self.activation, aggr)
         self.up_0_block_1 = GResNetBlock(nf, nf, norm, self.activation, aggr)
         self.up_0_block_2 = GResNetBlock(nf, nf, norm, self.activation, aggr)
 
-        self.up_1_block_0 = GResNetBlock(nf * 2, nf, norm, self.activation, aggr)
+        self.up_1_block_0 = GResNetBlock(nf * 2 + nf * 2, nf, norm, self.activation, aggr)
         self.up_1_block_1 = GResNetBlock(nf, nf, norm, self.activation, aggr)
         self.up_1_block_2 = GResNetBlock(nf, nf, norm, self.activation, aggr)
 
-        self.up_2_block_0 = GResNetBlock(nf * 2, nf * 2, norm, self.activation, aggr)
+        self.up_2_block_0 = GResNetBlock(nf * 2 + nf * 2, nf * 2, norm, self.activation, aggr)
         self.up_2_block_1 = GResNetBlock(nf * 2, nf * 2, norm, self.activation, aggr)
         self.up_2_block_2 = GResNetBlock(nf * 2, nf * 2, norm, self.activation, aggr)
 
-        self.up_3_block_0 = GResNetBlock(nf * 4, nf * 2, norm, self.activation, aggr)
+        self.up_3_block_0 = GResNetBlock(nf * 4 + nf * 4, nf * 2, norm, self.activation, aggr)
         self.up_3_block_1 = GResNetBlock(nf * 2, nf * 2, norm, self.activation, aggr)
         self.up_3_block_2 = GResNetBlock(nf * 2, nf * 2, norm, self.activation, aggr)
 
         self.up_4_block_0 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
         self.up_4_block_1 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
         self.up_4_block_2 = GResNetBlock(nf * 4, nf * 4, norm, self.activation, aggr)
-        self.up_4_attn_block_0 = GAttnBlock(nf * 4, norm)
-        self.up_4_attn_block_1 = GAttnBlock(nf * 4, norm)
-        self.up_4_attn_block_2 = GAttnBlock(nf * 4, norm)
+        # self.up_4_attn_block_0 = GAttnBlock(nf * 4, norm)
+        # self.up_4_attn_block_1 = GAttnBlock(nf * 4, norm)
+        # self.up_4_attn_block_2 = GAttnBlock(nf * 4, norm)
 
         self.dec_out_norm = norm(nf)
-        self.dec_out_conv = SAGEConv(nf, out_channels)
+        self.dec_out_conv = SAGEConv(nf, out_channels, aggr='max')
         self.tanh = nn.Tanh()
 
     def forward(self, x, edge_index, node_counts, pool_maps, sub_edges):
 
         x = self.enc_conv_in(x, edge_index)
         x = self.down_0_block_0(x, edge_index)
-        x = self.down_0_block_1(x, edge_index)
-        x = pool(x, node_counts[0], pool_maps[0], pool_op='max')
+        x_0 = self.down_0_block_1(x, edge_index)
+        x = pool(x_0, node_counts[0], pool_maps[0], pool_op='max')
 
         x = self.down_1_block_0(x, sub_edges[0])
         x = self.down_1_block_1(x, sub_edges[0])
 
         x = self.down_2_block_0(x, sub_edges[0])
-        x = self.down_2_block_1(x, sub_edges[0])
-        x = pool(x, node_counts[1], pool_maps[1], pool_op='max')
+        x_1 = self.down_2_block_1(x, sub_edges[0])
+        x = pool(x_1, node_counts[1], pool_maps[1], pool_op='max')
 
         x = self.down_3_block_0(x, sub_edges[1])
-        x = self.down_3_block_1(x, sub_edges[1])
-        x = pool(x, node_counts[2], pool_maps[2], pool_op='max')
+        x_2 = self.down_3_block_1(x, sub_edges[1])
+        x = pool(x_2, node_counts[2], pool_maps[2], pool_op='max')
 
         x = self.down_4_block_0(x, sub_edges[2])
-        x = self.down_4_attn_block_0(x)
-        x = self.down_4_block_1(x, sub_edges[2])
-        x = self.down_4_attn_block_1(x)
-        x = pool(x, node_counts[3], pool_maps[3], pool_op='max')
+        # x = self.down_4_attn_block_0(x)
+        x_3 = self.down_4_block_1(x, sub_edges[2])
+        # x = self.down_4_attn_block_1(x)
+        x = pool(x_3, node_counts[3], pool_maps[3], pool_op='max')
 
         x = self.enc_mid_block_0(x, sub_edges[3])
-        x = self.enc_mid_attn_0(x)
+        # x = self.enc_mid_attn_0(x)
         x = self.enc_mid_block_1(x, sub_edges[3])
 
         x = self.enc_out_norm(x)
@@ -343,31 +343,39 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
         x = self.dec_conv_in(x, sub_edges[3])
 
         x = self.dec_mid_block_0(x, sub_edges[3])
-        x = self.dec_mid_attn_0(x)
+        # x = self.dec_mid_attn_0(x)
         x = self.dec_mid_block_1(x, sub_edges[3])
 
         x = self.up_4_block_0(x, sub_edges[3])
-        x = self.up_4_attn_block_0(x)
+        # x = self.up_4_attn_block_0(x)
         x = self.up_4_block_1(x, sub_edges[3])
-        x = self.up_4_attn_block_1(x)
+        # x = self.up_4_attn_block_1(x)
         x = self.up_4_block_2(x, sub_edges[3])
-        x = self.up_4_attn_block_2(x)
+        # x = self.up_4_attn_block_2(x)
         x = unpool(x, pool_maps[3])
+
+        x = torch.cat([x, x_3], dim=1)
 
         x = self.up_3_block_0(x, sub_edges[2])
         x = self.up_3_block_1(x, sub_edges[2])
         x = self.up_3_block_2(x, sub_edges[2])
         x = unpool(x, pool_maps[2])
 
+        x = torch.cat([x, x_2], dim=1)
+
         x = self.up_2_block_0(x, sub_edges[1])
         x = self.up_2_block_1(x, sub_edges[1])
         x = self.up_2_block_2(x, sub_edges[1])
         x = unpool(x, pool_maps[1])
 
+        x = torch.cat([x, x_1], dim=1)
+
         x = self.up_1_block_0(x, sub_edges[0])
         x = self.up_1_block_1(x, sub_edges[0])
         x = self.up_1_block_2(x, sub_edges[0])
         x = unpool(x, pool_maps[0])
+
+        x = torch.cat([x, x_0], dim=1)
 
         x = self.up_0_block_0(x, edge_index)
         x = self.up_0_block_1(x, edge_index)
