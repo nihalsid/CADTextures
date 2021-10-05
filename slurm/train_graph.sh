@@ -15,4 +15,4 @@
 
 cd /rhome/ysiddiqui/CADTextures/
 
-python trainer/train_graphnet.py experiment=cube_graph_bigencdec_unet wandb_main=True
+python trainer/train_graphnet.py experiment=cube_graph_bigencdec_flagfix wandb_main=True

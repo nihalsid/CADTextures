@@ -4,8 +4,8 @@ from random import randint
 
 import hydra
 import wandb
+from omegaconf import OmegaConf
 from pytorch_lightning import seed_everything
-from pytorch_lightning.loggers import WandbLogger
 from tqdm import tqdm
 
 from dataset.graph_mesh_dataset import GraphMeshDataset
@@ -15,9 +15,7 @@ from util.misc import print_model_parameter_count
 from util.regression_loss import RegressionLossHelper
 
 
-def GATNetTrainer(config, logger):
-
-    logger.log_hyperparams(config)
+def GraphNetTrainer(config, logger):
 
     # declare device
     device = torch.device('cuda:0')
@@ -69,7 +67,6 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
     train_loss_running = 0.
 
     for epoch in range(config.max_epoch):
-        logger.log_metrics({'epoch': epoch}, epoch * len(traindataset))
 
         shuffled_indices = list(range(len(traindataset)))
         random.shuffle(shuffled_indices)
@@ -99,7 +96,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
 
             if iteration % config.print_interval == (config.print_interval - 1):
                 last_train_loss = train_loss_running / config.print_interval
-                logger.log_metrics({'loss_train': last_train_loss}, iteration)
+                logger.log({'loss_train': last_train_loss, 'iter': iteration, 'epoch': epoch})
                 train_loss_running = 0.
                 pbar.set_postfix({'loss': f'{last_train_loss:.4f}'})
 
@@ -123,7 +120,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
                 loss_total_val += l1_criterion.calculate_loss(prediction, sample_val.y).mean().item()
 
             print(f'[{epoch:03d}] val_loss: {loss_total_val / len(valdataset):.3f}')
-            logger.log_metrics({'loss_val': loss_total_val / len(valdataset)}, epoch * len(traindataset))
+            logger.log({'loss_val': loss_total_val / len(valdataset), 'iter': epoch * len(traindataset), 'epoch': epoch})
 
             if epoch % config.save_epoch == (config.save_epoch - 1):
                 torch.save(model.state_dict(), f'runs/{config.experiment}/model_{epoch}.ckpt')
@@ -154,9 +151,9 @@ def main(config):
     if config.seed is None:
         config.seed = randint(0, 999)
     ds_name = '_'.join(config.dataset.name.split('/'))
-    logger = WandbLogger(project=f'GATNet{config.suffix}[{ds_name}]', name=config.experiment, id=config.experiment)
+    logger = wandb.init(project=f'GATNet{config.suffix}[{ds_name}]', name=config.experiment, id=config.experiment)
     seed_everything(config.seed)
-    GATNetTrainer(config, logger)
+    GraphNetTrainer(config, logger)
 
 
 if __name__ == '__main__':
