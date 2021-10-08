@@ -24,7 +24,7 @@ def GraphNetTrainer(config, logger):
     # model = GATNet(63 + 3 + 1 + 6, 3, 256, 0)
     # model = GraphSAGENet(3 + 3 + 1 + 6, 3, 256, 0)
     # model = GraphSAGEEncoderDecoder(3 + 3 + 1 + 6, 3, 64)
-    model = BigGraphSAGEEncoderDecoder(3 + 3 + 1 + 6, 3, 128, 'max')
+    model = BigGraphSAGEEncoderDecoder(3 + 3 + 1, 3, 128, 'max')
     # model = GCNNet(63 + 3 + 1 + 6, 3, 256, 0)
     # wandb.watch(model, log='all')
 
@@ -82,7 +82,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
             prediction = model(sample.x, sample.edge_index, sample.num_sub_vertices, sample.pool_maps, sample.sub_edges)
 
             # compute loss
-            loss_total = loss_criterion.calculate_loss(prediction[:sample.y.shape[0], :], sample.y).mean(dim=1).mean()
+            loss_total = (loss_criterion.calculate_loss(prediction[:sample.y.shape[0], :], sample.y).mean(dim=1) * traindataset.mask(sample.y)).mean()
 
             # compute gradients on loss_total
             loss_total.backward()
@@ -117,7 +117,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
                     prediction = model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.sub_edges)
                     prediction = prediction[:sample_val.y.shape[0], :]
 
-                loss_total_val += l1_criterion.calculate_loss(prediction, sample_val.y).mean().item()
+                loss_total_val += (l1_criterion.calculate_loss(prediction, sample_val.y).mean(dim=1) * valdataset.mask(sample_val.y)).mean().item()
 
             print(f'[{epoch:03d}] val_loss: {loss_total_val / len(valdataset):.3f}')
             logger.log({'loss_val': loss_total_val / len(valdataset), 'iter': epoch * len(traindataset), 'epoch': epoch})
@@ -132,9 +132,10 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
                     prediction = model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.sub_edges)
                     prediction = prediction[:sample_val.y.shape[0], :]
 
-                valvisdataset.visualize_graph_with_predictions(sample_val, sample_val.y.cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'gt')
-                valvisdataset.visualize_graph_with_predictions(sample_val, prediction.cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'pred')
-                valvisdataset.visualize_graph_with_predictions(sample_val, sample_val.x[:, -10:-7].cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'in')
+                mask = valdataset.mask(sample_val.y).unsqueeze(-1)
+                valvisdataset.visualize_graph_with_predictions(sample_val, (sample_val.y * mask).cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'gt')
+                valvisdataset.visualize_graph_with_predictions(sample_val, (prediction * mask).cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'pred')
+                valvisdataset.visualize_graph_with_predictions(sample_val, (sample_val.x[:, 3:6] * mask).cpu().numpy(), f'runs/{config.experiment}/visualization/epoch_{epoch:05d}', 'in')
 
             # set model back to train
             model.train()

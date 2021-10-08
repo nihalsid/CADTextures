@@ -16,6 +16,7 @@ from util.embedder import get_embedder_nerf
 
 
 class GraphMeshDataset(Dataset):
+
     def __init__(self, config, split, use_single_view, transform=None, pre_transform=None, load_to_memory=False):
         splits_file = Path(config.dataset.data_dir) / 'splits' / config.dataset.name / config.dataset.splits_dir / f'{split}.txt'
         self.split_name = f'{config.dataset.splits_dir}_{split}'
@@ -27,6 +28,7 @@ class GraphMeshDataset(Dataset):
                 self.items = [(item, x, y) for item in item_list for x in range(225, 60, -45) for y in range(0, 360, 45)]
             self.target_name = "model_normalized.obj"
             self.input_name = lambda x, y: f"model_normalized_input_{x:03d}_{y:03d}.obj"
+            self.mask = lambda x, device: torch.ones((x.shape[0],)).float().to(device)
         else:
             if use_single_view:
                 self.items = [(item, 0, 0) for item in item_list]
@@ -34,6 +36,8 @@ class GraphMeshDataset(Dataset):
                 self.items = [(item, x, 0) for item in item_list for x in range(12)]
             self.target_name = "surface_texture.obj"
             self.input_name = lambda x, y: f"inv_partial_texture_{x:03d}.obj"
+            self.target_valid_area = trimesh.load(Path(config.dataset.data_dir, config.dataset.name) / "coloredbrodatz_D48_COLORED" / self.target_name, process=False).visual.vertex_colors[:, 3] == 255
+            self.mask = lambda x: torch.from_numpy(self.target_valid_area).float().to(x.device)
         self.items = [x for i, x in enumerate(self.items) if i % config.n_proc == config.proc]
         super().__init__(Path(config.dataset.data_dir, config.dataset.name), transform, pre_transform)
         self.memory = []
@@ -114,7 +118,7 @@ class GraphMeshDataset(Dataset):
     def visualize_graph_with_predictions(self, item, prediction, output_dir, output_suffix):
         output_dir = Path(output_dir)
         output_dir.mkdir(exist_ok=True, parents=True)
-        mesh = trimesh.load(Path(self.raw_dir, "_".join(item.name.split('_')[:-2])) / "model_normalized.obj", force='mesh', process=False)
+        mesh = trimesh.load(Path(self.raw_dir, "_".join(item.name.split('_')[:-2])) / self.target_name, force='mesh', process=False)
         mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, vertex_colors=prediction + 0.5, process=False)
         mesh.export(output_dir / f"{item.name}_{output_suffix}.obj")
 
