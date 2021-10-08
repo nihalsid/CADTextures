@@ -1,6 +1,7 @@
 # @package _group_
-name: 'SingleShape/CubeTexturesForGraph'
+name: 'SingleShape/CubeTexturePlane'
 single_view: False
 data_dir: 'data'
 splits_dir: 'official'
 memory: False
+plane: True

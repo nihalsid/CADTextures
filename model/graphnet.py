@@ -11,11 +11,10 @@ from torch_sparse import spspmm
 
 
 def pool(x, node_count, pool_map, pool_op='max'):
-    x_pooled = torch.zeros((node_count, x.shape[1]), dtype=x.dtype).to(x.device)
     if pool_op == 'max':
-        torch_scatter.scatter_max(x, pool_map, dim=0, out=x_pooled)
+        x_pooled = torch_scatter.scatter_max(x, pool_map, dim=0)[0]
     elif pool_op == 'mean':
-        torch_scatter.scatter_mean(x, pool_map, dim=0, out=x_pooled)
+        x_pooled = torch_scatter.scatter_mean(x, pool_map, dim=0)
     return x_pooled
 
 

@@ -20,11 +20,21 @@ class GraphMeshDataset(Dataset):
         splits_file = Path(config.dataset.data_dir) / 'splits' / config.dataset.name / config.dataset.splits_dir / f'{split}.txt'
         self.split_name = f'{config.dataset.splits_dir}_{split}'
         item_list = read_list(splits_file)
-        if use_single_view:
-            self.items = [(item, 180, 45) for item in item_list]
+        if not config.dataset.plane:
+            if use_single_view:
+                self.items = [(item, 180, 45) for item in item_list]
+            else:
+                self.items = [(item, x, y) for item in item_list for x in range(225, 60, -45) for y in range(0, 360, 45)]
+            self.target_name = "model_normalized.obj"
+            self.input_name = lambda x, y: f"model_normalized_input_{x:03d}_{y:03d}.obj"
         else:
-            self.items = [(item, x, y) for item in item_list for x in range(225, 60, -45) for y in range(0, 360, 45)]
-        # self.items = [x for i, x in enumerate(self.items) if i % config.n_proc == config.proc]
+            if use_single_view:
+                self.items = [(item, 0, 0) for item in item_list]
+            else:
+                self.items = [(item, x, 0) for item in item_list for x in range(12)]
+            self.target_name = "surface_texture.obj"
+            self.input_name = lambda x, y: f"inv_partial_texture_{x:03d}.obj"
+        self.items = [x for i, x in enumerate(self.items) if i % config.n_proc == config.proc]
         super().__init__(Path(config.dataset.data_dir, config.dataset.name), transform, pre_transform)
         self.memory = []
         self.load_to_memory = False
@@ -60,7 +70,7 @@ class GraphMeshDataset(Dataset):
         for x in tqdm(self.items, desc=f'process_{self.split_name}'):
             if not os.path.exists(os.path.join(self.processed_dir, f'{self.item_to_name(x)}.pt')):
                 # Read data from `raw_path`.
-                data = self.read_mesh_data(Path(self.raw_dir, x[0]) / "model_normalized.obj", Path(self.raw_dir, x[0]) / f"model_normalized_input_{x[1]:03d}_{x[2]:03d}.obj", x[1], x[2])
+                data = self.read_mesh_data(Path(self.raw_dir, x[0]) / self.target_name, Path(self.raw_dir, x[0]) / self.input_name(x[1], x[2]), x[1], x[2])
 
                 if self.pre_filter is not None and not self.pre_filter(data):
                     continue
@@ -89,9 +99,9 @@ class GraphMeshDataset(Dataset):
         # nodes = -1 + (nodes - nodes.min()) / (nodes.max() - nodes.min()) * 2
         # embedder, embedder_out_dim = get_embedder_nerf(10, input_dims=3, i=0)
         # nodes = embedder(torch.from_numpy(nodes)).numpy()
-        mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1), vertex_features))).float(),
-                         # mesh_data = Data(x=torch.from_numpy(np.hstack((input_colors, valid_colors.reshape(-1, 1)))).float(),
-                         # mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1)))).float(),
+        # mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1), vertex_features))).float(),
+        #                  mesh_data = Data(x=torch.from_numpy(np.hstack((input_colors, valid_colors.reshape(-1, 1)))).float(),
+        mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1)))).float(),
                          y=torch.from_numpy(target_colors).float(),
                          edge_index=torch.from_numpy(np.hstack([edges, edges[[1, 0], :]])).long(),
                          edge_attr=torch.from_numpy(np.vstack([edge_features, edge_features])).float(),
@@ -111,7 +121,7 @@ class GraphMeshDataset(Dataset):
 
 @hydra.main(config_path='../config', config_name='graph_nn')
 def main(config):
-    print(len(GraphMeshDataset(config, 'val', use_single_view=False)))
+    print(len(GraphMeshDataset(config, 'train', use_single_view=False)))
 
 
 if __name__ == '__main__':
