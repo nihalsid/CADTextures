@@ -1,0 +1,7 @@
+# @package _group_
+name: 'SingleShape/TorusTexturesForGraph'
+single_view: False
+data_dir: 'data'
+splits_dir: 'official'
+memory: False
+plane: False

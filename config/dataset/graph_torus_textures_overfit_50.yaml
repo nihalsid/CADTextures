@@ -1,0 +1,7 @@
+# @package _group_
+name: 'SingleShape/TorusTexturesForGraph'
+single_view: True
+data_dir: 'data'
+splits_dir: 'overfit_050'
+memory: True
+plane: False
