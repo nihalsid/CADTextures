@@ -28,7 +28,7 @@ class GraphMeshDataset(Dataset):
                 self.items = [(item, x, y) for item in item_list for x in range(225, 60, -45) for y in range(0, 360, 45)]
             self.target_name = "model_normalized.obj"
             self.input_name = lambda x, y: f"model_normalized_input_{x:03d}_{y:03d}.obj"
-            self.mask = lambda x, device: torch.ones((x.shape[0],)).float().to(device)
+            self.mask = lambda x: torch.ones((x.shape[0],)).float().to(x.device)
         else:
             if use_single_view:
                 self.items = [(item, 0, 0) for item in item_list]

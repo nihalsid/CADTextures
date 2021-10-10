@@ -32,7 +32,8 @@ def manifold_meshes(input_folder, target_folder, process_id, total_procs):
         # (target_folder / mesh.parents[0].name).mkdir(exist_ok=True)
         dirname = os.path.dirname(os.path.realpath(__file__))
         os.system(f"{dirname}/manifold/manifold --input {mesh} --output {target_folder / mesh.parents[1].name / 'model_normalized.obj'} --depth {DEPTH}")
-        # os.system(f"cp {mesh} {target_folder / mesh.parents[0].name / 'model_normalized.obj'}")
+        # for obj in [o for o in mesh.parent.iterdir() if o.name.endswith('.obj')]:
+        #     os.system(f"cp {obj} {target_folder / mesh.parents[0].name / obj.name}")
 
 
 if __name__ == "__main__":
