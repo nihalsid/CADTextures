@@ -36,7 +36,9 @@ class GraphMeshDataset(Dataset):
                 self.items = [(item, x, 0) for item in item_list for x in range(12)]
             self.target_name = "surface_texture.obj"
             self.input_name = lambda x, y: f"inv_partial_texture_{x:03d}.obj"
-            self.target_valid_area = trimesh.load(Path(config.dataset.data_dir, config.dataset.name) / "coloredbrodatz_D48_COLORED" / self.target_name, process=False).visual.vertex_colors[:, 3] == 255
+            mesh = trimesh.load(Path(config.dataset.data_dir, config.dataset.name) / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
+            self.target_valid_area = mesh.visual.vertex_colors[:, 3] == 255
+            self.sort_indices = np.lexsort((mesh.vertices[:, 0], mesh.vertices[:, 1], mesh.vertices[:, 2]))
             self.mask = lambda x: torch.from_numpy(self.target_valid_area).float().to(x.device)
         self.items = [x for i, x in enumerate(self.items) if i % config.n_proc == config.proc]
         super().__init__(Path(config.dataset.data_dir, config.dataset.name), transform, pre_transform)
@@ -104,7 +106,7 @@ class GraphMeshDataset(Dataset):
         # embedder, embedder_out_dim = get_embedder_nerf(10, input_dims=3, i=0)
         # nodes = embedder(torch.from_numpy(nodes)).numpy()
         # mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1), vertex_features))).float(),
-        #                  mesh_data = Data(x=torch.from_numpy(np.hstack((input_colors, valid_colors.reshape(-1, 1)))).float(),
+                         # mesh_data = Data(x=torch.from_numpy(np.hstack((input_colors, valid_colors.reshape(-1, 1)))).float(),
         mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1)))).float(),
                          y=torch.from_numpy(target_colors).float(),
                          edge_index=torch.from_numpy(np.hstack([edges, edges[[1, 0], :]])).long(),
@@ -121,6 +123,16 @@ class GraphMeshDataset(Dataset):
         mesh = trimesh.load(Path(self.raw_dir, "_".join(item.name.split('_')[:-2])) / self.target_name, force='mesh', process=False)
         mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, vertex_colors=prediction + 0.5, process=False)
         mesh.export(output_dir / f"{item.name}_{output_suffix}.obj")
+
+    def plane_to_image(self, vertex_colors):
+        sort_index_i = 0
+        image = np.zeros((128, 128, 3), dtype=np.float32)
+        for i in range(127, -1, -1):
+            for j in range(128):
+                image[i, j, :] = vertex_colors[self.sort_indices[sort_index_i], :3]
+                sort_index_i += 1
+            sort_index_i += 1
+        return torch.from_numpy(image).permute((2, 0, 1))
 
 
 @hydra.main(config_path='../config', config_name='graph_nn')

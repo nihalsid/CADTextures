@@ -15,9 +15,9 @@ class FeatureLossHelper:
         if mode == 'lll':
             self.calculate_style_loss = self.calculate_style_loss_lll
             self.calculate_feature_loss = self.calculate_feature_loss_lll
-        elif mode == 'lab':
-            self.calculate_style_loss = self.calculate_style_loss_lab
-            self.calculate_feature_loss = self.calculate_feature_loss_lab
+        elif mode == 'rgb':
+            self.calculate_style_loss = self.calculate_style_loss_rgb
+            self.calculate_feature_loss = self.calculate_feature_loss_rgb
         else:
             raise NotImplementedError
 
@@ -43,8 +43,9 @@ class FeatureLossHelper:
         target_lll, prediction_lll = self.prepare_vgg_input(target_l, prediction_l)
         return self.criterion(self.feature_extractor(prediction_lll, self.layers_content)[0], self.feature_extractor(target_lll, self.layers_content)[0].detach())
 
-    def calculate_feature_loss_lab(self, target_lab, prediction_lab):
-        return self.criterion(self.feature_extractor(prediction_lab, self.layers_content)[0], self.feature_extractor(target_lab, self.layers_content)[0].detach())
+    def calculate_feature_loss_rgb(self, target_lab, prediction_lab):
+        target_lab_n, prediction_lab_n = self.normalize_for_vgg(target_lab + 0.5), self.normalize_for_vgg(prediction_lab + 0.5)
+        return self.criterion(self.feature_extractor(prediction_lab_n, self.layers_content)[0], self.feature_extractor(target_lab_n, self.layers_content)[0].detach())
 
     def calculate_style_loss_lll(self, target_l, prediction_l):
         target_lll, prediction_lll = self.prepare_vgg_input(target_l, prediction_l)
@@ -58,9 +59,10 @@ class FeatureLossHelper:
             error_maps.append(self.criterion(gram_y, gram_s))
         return error_maps
 
-    def calculate_style_loss_lab(self, target_lab, prediction_lab):
-        features_prediction = self.feature_extractor(prediction_lab, self.layers_style)
-        features_target = self.feature_extractor(target_lab, self.layers_style)
+    def calculate_style_loss_rgb(self, target_lab, prediction_lab):
+        target_lab_n, prediction_lab_n = self.normalize_for_vgg(target_lab + 0.5), self.normalize_for_vgg(prediction_lab + 0.5)
+        features_prediction = self.feature_extractor(prediction_lab_n, self.layers_style)
+        features_target = self.feature_extractor(target_lab_n, self.layers_style)
         gram = GramMatrix()
         error_maps = []
         for m in range(len(features_target)):

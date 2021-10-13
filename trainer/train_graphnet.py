@@ -4,13 +4,14 @@ from random import randint
 
 import hydra
 import wandb
-from omegaconf import OmegaConf
+import numpy as np
 from pytorch_lightning import seed_everything
 from tqdm import tqdm
 
 from dataset.graph_mesh_dataset import GraphMeshDataset
 import torch
 from model.graphnet import GATNet, GraphSAGENet, GCNNet, GraphUNet, GraphSAGEEncoderDecoder, BigGraphSAGEEncoderDecoder
+from util.feature_loss import FeatureLossHelper
 from util.misc import print_model_parameter_count
 from util.regression_loss import RegressionLossHelper
 
@@ -56,6 +57,9 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
     # declare loss and move to specified device
     loss_criterion = RegressionLossHelper('l1')
     l1_criterion = RegressionLossHelper('l1')
+    l2_criterion = RegressionLossHelper('l2')
+    feature_loss_helper = FeatureLossHelper(['relu4_2'], ['relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1'], 'rgb')
+    feature_loss_helper.move_to_device(device)
 
     # declare optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
@@ -106,7 +110,10 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
             # set model to eval, important if your network has e.g. dropout or batchnorm layers
             model.eval()
 
-            loss_total_val = 0
+            loss_total_val_l1 = 0
+            loss_total_val_l2 = 0
+            content_loss = 0
+            style_loss = 0
 
             # forward pass and evaluation for entire validation set
             for sample_val in valdataset:
@@ -117,10 +124,20 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
                     prediction = model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.sub_edges)
                     prediction = prediction[:sample_val.y.shape[0], :]
 
-                loss_total_val += (l1_criterion.calculate_loss(prediction, sample_val.y).mean(dim=1) * valdataset.mask(sample_val.y)).mean().item()
+                mask = valdataset.mask(sample_val.y)
+                loss_total_val_l1 += (l1_criterion.calculate_loss(prediction, sample_val.y).mean(dim=1) * mask).mean().item()
+                loss_total_val_l2 += (l2_criterion.calculate_loss(prediction, sample_val.y).mean(dim=1) * mask).mean().item()
+                prediction_as_image = valdataset.plane_to_image((prediction * mask.unsqueeze(-1)).cpu().numpy()).unsqueeze(0).to(prediction.device)
+                target_as_image = valdataset.plane_to_image((sample_val.y * mask.unsqueeze(-1)).cpu().numpy()).unsqueeze(0).to(prediction.device)
+                with torch.no_grad():
+                    content_loss += feature_loss_helper.calculate_feature_loss(target_as_image, prediction_as_image).mean().item()
+                    style_loss_maps = feature_loss_helper.calculate_style_loss(target_as_image, prediction_as_image)
+                    style_loss += np.mean([style_loss_maps[map_idx].mean().item() for map_idx in range(len(style_loss_maps))])
 
-            print(f'[{epoch:03d}] val_loss: {loss_total_val / len(valdataset):.3f}')
-            logger.log({'loss_val': loss_total_val / len(valdataset), 'iter': epoch * len(traindataset), 'epoch': epoch})
+            for loss_name, loss_var in [("loss_val_l1", loss_total_val_l1), ("loss_val_l2", loss_total_val_l2),
+                                        ("loss_val_style", style_loss), ("loss_val_content", content_loss)]:
+                print(f'[{epoch:03d}] {loss_name}: {loss_var / len(valdataset):.5f}')
+                logger.log({loss_name: loss_var / len(valdataset), 'iter': epoch * len(traindataset), 'epoch': epoch})
 
             if epoch % config.save_epoch == (config.save_epoch - 1):
                 torch.save(model.state_dict(), f'runs/{config.experiment}/model_{epoch}.ckpt')

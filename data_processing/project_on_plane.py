@@ -6,7 +6,7 @@ import shutil
 import os
 from tqdm import tqdm
 
-plane = trimesh.load("data/SingleShape/CubeTexturePlane/base/128_128.obj", process=False, force='mesh')
+plane = trimesh.load("data/SingleShape-model/CubeTexturePlaneQuad/base/model_normalized.obj", process=False, force='mesh')
 vertices = np.array(plane.vertices)
 sort_indices = np.lexsort((vertices[:, 0], vertices[:, 1], vertices[:, 2]))
 
@@ -37,7 +37,7 @@ def process_sample(sample_input_dir, output_dir):
     decimations = ["064_064", "032_032", "016_016", "008_008", "004_004"]
 
     for i, d in enumerate(decimations):
-        shutil.copyfile(f"data/SingleShape/CubeTexturePlane/base/{d}.obj", output_dir + f"/decimate_{i + 1}.obj")
+        shutil.copyfile(f"data/SingleShape-model/CubeTexturePlaneQuad/base/{d}.obj", output_dir + f"/decimate_{i + 1}.obj")
     os.remove(output_dir + "/material.mtl")
 
 
@@ -57,4 +57,4 @@ if __name__ == "__main__":
     parser.add_argument('-p', '--proc', default=0, type=int)
 
     args = parser.parse_args()
-    main("data/SingleShape/CubeTextures/", "data/SingleShape/CubeTexturePlane/", args.num_proc, args.proc)
+    main("data/SingleShape/CubeTextures/", "data/SingleShape/CubeTexturePlaneQuad/", args.num_proc, args.proc)
