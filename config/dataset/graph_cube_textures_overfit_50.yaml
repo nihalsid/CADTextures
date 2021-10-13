@@ -1,5 +1,5 @@
 # @package _group_
-name: 'SingleShape/CubeTexturePlane'
+name: 'SingleShape/CubeTexturePlaneQuad'
 single_view: True
 data_dir: 'data'
 splits_dir: 'overfit_050'

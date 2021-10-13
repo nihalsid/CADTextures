@@ -21,6 +21,24 @@ def test_decimation_plane():
     trimesh.Trimesh(vertices=decimate_2.vertices, vertex_colors=torch.cat((x, x, x), dim=1).numpy(), faces=decimate_2.faces, process=False).export('decimate_2_mask.obj')
 
 
+def test_decimation_plane_quad():
+    original = trimesh.load("data/SingleShape/CubeTexturePlaneQuad/coloredbrodatz_D48_COLORED/surface_texture.obj", force='mesh', process=False)
+    decimate_2 = trimesh.load("data/SingleShape/CubeTexturePlaneQuad/coloredbrodatz_D48_COLORED/decimate_2.obj", force='mesh', process=False)
+    data = torch.load("data/SingleShape/CubeTexturePlaneQuad_overfit_004_val_vis_processed/coloredbrodatz_D48_COLORED_000_000.pt")
+
+    x = pool(data.y, data.num_sub_vertices[0], data.pool_maps[0], pool_op='max')
+    x = pool(x, data.num_sub_vertices[1], data.pool_maps[1], pool_op='max')
+    trimesh.Trimesh(vertices=decimate_2.vertices, vertex_colors=x[:, :].numpy() + 0.5, faces=decimate_2.faces, process=False).export('decimate_2.obj')
+    x = unpool(x, data.pool_maps[1])
+    x = unpool(x, data.pool_maps[0])
+    trimesh.Trimesh(vertices=original.vertices, vertex_colors=x[:, :].numpy() + 0.5, faces=original.faces, process=False).export('original.obj')
+    trimesh.Trimesh(vertices=original.vertices, vertex_colors=data.y.numpy() + 0.5, faces=original.faces, process=False).export('originaly.obj')
+
+    x = pool(torch.ones((data.y.shape[0], 1)), data.num_sub_vertices[0], data.pool_maps[0], pool_op='max')
+    x = pool(x, data.num_sub_vertices[1], data.pool_maps[1], pool_op='max')
+    trimesh.Trimesh(vertices=decimate_2.vertices, vertex_colors=torch.cat((x, x, x), dim=1).numpy(), faces=decimate_2.faces, process=False).export('decimate_2_mask.obj')
+
+
 def test_decimation_torus():
     original = trimesh.load("data/SingleShape/TorusTexturesForGraph/coloredbrodatz_D48_COLORED/model_normalized.obj", force='mesh', process=False)
     decimate_2 = trimesh.load("data/SingleShape/TorusTexturesForGraph/coloredbrodatz_D48_COLORED/decimate_2.obj", force='mesh', process=False)
@@ -40,4 +58,4 @@ def test_decimation_torus():
 
 
 if __name__ == '__main__':
-    test_decimation_torus()
+    test_decimation_plane_quad()
