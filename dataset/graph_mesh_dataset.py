@@ -135,6 +135,88 @@ class GraphMeshDataset(Dataset):
         return torch.from_numpy(image).permute((2, 0, 1))
 
 
+class FaceGraphMeshDataset(torch.utils.data.Dataset):
+
+    def __init__(self, config, split, use_single_view, load_to_memory=False):
+        self.raw_dir = Path(config.dataset.data_dir, config.dataset.name)
+        splits_file = Path(config.dataset.data_dir) / 'splits' / config.dataset.name / config.dataset.splits_dir / f'{split}.txt'
+        self.split_name = f'{config.dataset.splits_dir}_{split}'
+        item_list = read_list(splits_file)
+        if not config.dataset.plane:
+            if use_single_view:
+                self.items = [(item, 180, 45) for item in item_list]
+            else:
+                self.items = [(item, x, y) for item in item_list for x in range(225, 60, -45) for y in range(0, 360, 45)]
+            self.target_name = "model_normalized.obj"
+            self.input_name = lambda x, y: f"model_normalized_input_{x:03d}_{y:03d}.obj"
+            self.mask = lambda x: torch.ones((x.shape[0],)).float().to(x.device)
+        else:
+            if use_single_view:
+                self.items = [(item, 0, 0) for item in item_list]
+            else:
+                self.items = [(item, x, 0) for item in item_list for x in range(12)]
+            self.target_name = "surface_texture.obj"
+            self.input_name = lambda x, y: f"inv_partial_texture_{x:03d}.obj"
+            mesh = trimesh.load(Path(config.dataset.data_dir, config.dataset.name) / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
+            self.target_valid_area = mesh.visual.face_colors[:, 3] == 255
+            mesh_triangle_center = mesh.triangles.mean(axis=1)
+            self.sort_indices = np.lexsort((mesh_triangle_center[:, 0], mesh_triangle_center[:, 1], mesh_triangle_center[:, 2]))
+            self.mask = lambda x: torch.from_numpy(self.target_valid_area).float().to(x.device)
+        self.items = [x for i, x in enumerate(self.items) if i % config.n_proc == config.proc]
+        self.memory = []
+        self.load_to_memory = False
+        if load_to_memory:
+            for i in tqdm(range(self.__len__()), 'load_to_mem'):
+                self.memory.append(self.__getitem__(i))
+            self.load_to_memory = True
+
+    @staticmethod
+    def item_to_name(item):
+        return f"{item[0]}_{item[1]:03d}_{item[2]:03d}"
+
+    @property
+    def processed_dir(self) -> str:
+        return str(Path(self.raw_dir).parent / f'{Path(self.raw_dir).name}_FC_processed')
+
+    def __len__(self):
+        unique_items = list(set([x[0] for x in self.items]))
+        return len(unique_items)
+
+    def __getitem__(self, idx):
+        if self.load_to_memory:
+            return self.memory[idx]
+        unique_items = list(set([x[0] for x in self.items]))
+        indexed_items = [x for x in self.items if x[0] == unique_items[idx]]
+        selected_item = random.choice(indexed_items)
+        pt_arxiv = torch.load(os.path.join(self.processed_dir, f'{self.item_to_name(selected_item)}.pt'))
+        data = Data(x=torch.cat((pt_arxiv['input_positions'], pt_arxiv['input_colors'], pt_arxiv['valid_input_colors'].reshape(-1, 1)), 1).float(),
+                    y=pt_arxiv['target_colors'].float(),
+                    edge_index=pt_arxiv['conv_data'][0][0].long(),
+                    num_sub_vertices=[pt_arxiv['conv_data'][i][0].shape[0] for i in range(1, len(pt_arxiv['conv_data']))],
+                    pad_sizes=[pt_arxiv['conv_data'][i][2].shape[0] for i in range(len(pt_arxiv['conv_data']))],
+                    sub_edges=[pt_arxiv['conv_data'][i][0].long() for i in range(1, len(pt_arxiv['conv_data']))],
+                    pool_maps=pt_arxiv['pool_locations'],
+                    name=f"{self.item_to_name(selected_item)}")
+        return data
+
+    def visualize_graph_with_predictions(self, item, prediction, output_dir, output_suffix):
+        output_dir = Path(output_dir)
+        output_dir.mkdir(exist_ok=True, parents=True)
+        mesh = trimesh.load(Path(self.raw_dir, "_".join(item.name.split('_')[:-2])) / self.target_name, force='mesh', process=False)
+        mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, face_colors=prediction + 0.5, process=False)
+        mesh.export(output_dir / f"{item.name}_{output_suffix}.obj")
+
+    def plane_to_image(self, face_colors):
+        sort_index_i = 0
+        image = np.zeros((128, 128, 3), dtype=np.float32)
+        for i in range(127, -1, -1):
+            for j in range(128):
+                image[i, j, :] = (face_colors[self.sort_indices[sort_index_i], :3] + face_colors[self.sort_indices[sort_index_i + 128], :3]) / 2
+                sort_index_i += 1
+            sort_index_i += 128
+        return torch.from_numpy(image).permute((2, 0, 1))
+
+
 @hydra.main(config_path='../config', config_name='graph_nn')
 def main(config):
     print(len(GraphMeshDataset(config, 'train', use_single_view=False)))

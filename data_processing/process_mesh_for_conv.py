@@ -6,6 +6,8 @@ from tqdm import tqdm
 import numpy as np
 import torch
 
+from util.misc import read_list
+
 
 def get_face_neighbors(mesh):
     face_neighbors = [[-1, -1, -1] for _ in range(mesh.faces.shape[0])]
@@ -86,27 +88,38 @@ def cartesian_ordering(face_neighbors, faces, vertices):
     return face_neighbors
 
 
+def append_self_face(face_neighbors):
+    for face_neighbor_idx, face_neighbor in enumerate(face_neighbors):
+        face_neighbors[face_neighbor_idx] = [face_neighbor_idx] + face_neighbors[face_neighbor_idx]
+    return face_neighbors
+
+
 def calculate_face_hierarchies(decimation_mesh):
     from scipy.spatial import KDTree
     pool_down_locations = []
     for i in range(1, len(decimation_mesh)):
         mesh_src = decimation_mesh[i - 1]
         mesh_tgt = decimation_mesh[i]
-        num_samples = max(min(mesh_src.faces.shape[0] * 10 * i * i, 500000), mesh_src.faces.shape[0] * i * i)
+        num_samples = max(min(mesh_src.faces.shape[0] * 50 * i * i, 500000), mesh_src.faces.shape[0] * i * i)
         samples_src, face_idx_src = trimesh.sample.sample_surface_even(mesh_src, num_samples)
         samples_tgt, face_idx_tgt = trimesh.sample.sample_surface_even(mesh_tgt, num_samples)
         tree = KDTree(samples_tgt)
         distances, indices = tree.query(samples_src, k=1)
         face_map_src_tgt = np.zeros(mesh_src.faces.shape[0], np.int64)
         for face_idx in range(mesh_src.faces.shape[0]):
+            # TODO: what happens when no point lands on face_idx_src ? At the moment, crashes.
             mask_src_faces = face_idx_src == face_idx
             uniques, unique_counts = np.unique(face_idx_tgt[indices[mask_src_faces]], return_counts=True)
+            assert (uniques.shape[0] > 0 and unique_counts.shape[0] > 0), f"{uniques.shape[0]}, {unique_counts.shape[0]} unique NNs"
             face_map_src_tgt[face_idx] = uniques[np.argmax(unique_counts)]
         pool_down_locations.append(face_map_src_tgt)
     return pool_down_locations
 
 
 def process_mesh(mesh_input_directory, output_processed_directory):
+    already_exists = np.all([(output_processed_directory / f"{mesh_input_directory.name}_{i:03d}_000.pt").exists() for i in range(12)])
+    if already_exists:
+        return
     mesh_src_paths = [mesh_input_directory / f"inv_partial_texture_{i:03d}.obj" for i in range(12)]
     mesh_target_path = mesh_input_directory / "surface_texture.obj"
     decimated_paths = sorted([x for x in Path(mesh_target_path).parent.iterdir() if x.name.startswith('decimate') and x.name.endswith('.obj')])
@@ -119,25 +132,46 @@ def process_mesh(mesh_input_directory, output_processed_directory):
     for d in decimations:
         face_neighbors, vertices, faces, is_pad_vertex, is_pad_face = get_face_neighbors(d)
         face_neighbors = cartesian_ordering(face_neighbors, faces, vertices)
+        face_neighbors = append_self_face(face_neighbors)
         conv_data.append((face_neighbors, vertices, faces, is_pad_vertex, is_pad_face))
     pool_locations = calculate_face_hierarchies(decimations)
     face_colors_target = mesh.visual.face_colors
     for i, ms in enumerate(mesh_src_paths):
-        face_colors_src = trimesh.load(ms, process=False, force='mesh').visual.face_colors
+        in_mesh = trimesh.load(ms, process=False, force='mesh')
+        face_colors_src = in_mesh.visual.face_colors
         torch.save({
+            "input_positions": torch.from_numpy(in_mesh.triangles.mean(axis=1)).float(),
             "input_colors": torch.from_numpy(face_colors_src[:, :3]).float() / 255 - 0.5,
-            "target_colors": torch.from_numpy(face_colors_target).float() / 255 - 0.5,
-            "valid_colors": torch.from_numpy(face_colors_target[:, 3]).float() / 255,
+            "target_colors": torch.from_numpy(face_colors_target[:, :3]).float() / 255 - 0.5,
+            "valid_input_colors": torch.from_numpy(face_colors_src[:, 3]).float() / 255,
+            "valid_target_colors": torch.from_numpy(face_colors_target[:, 3]).float() / 255,
             "pool_locations": [torch.from_numpy(p).long() for p in pool_locations],
             "conv_data": [[torch.from_numpy(np.array(cd[0])).long(), torch.from_numpy(cd[1]).float(),
                           torch.from_numpy(cd[2]).long(), torch.from_numpy(cd[3]).bool(),
                           torch.from_numpy(cd[4]).bool()] for cd in conv_data]
-        }, output_processed_directory / f"{mesh_input_directory.name}_000_{i:03d}.pt")
+        }, output_processed_directory / f"{mesh_input_directory.name}_{i:03d}_000.pt")
     return
 
 
-if __name__ == '__main__':
-    mesh_in_dir = Path("data/SingleShape/CubeTexturePlane/coloredbrodatz_D48_COLORED/")
-    processed_out_dir = Path("data/SingleShape/CubeTexturePlane_FC_proccesed/")
+def all_export(proc, n_proc):
+    dataset = "SingleShape/CubeTexturePlane"
+    split = "official"
+    items = sorted(list(set(read_list("data/splits/" + dataset + f"/{split}/train.txt") + read_list("data/splits/" + dataset + f"/{split}/val.txt"))))
+    print("Length of items: ", len(items))
+    mesh_in_dirs = [Path("data", dataset, item) for item in items]
+    mesh_in_dirs = [x for i, x in enumerate(mesh_in_dirs) if i % n_proc == proc]
+    processed_out_dir = Path(f"data/{dataset}_FC_processed/")
     processed_out_dir.mkdir(exist_ok=True, parents=True)
-    process_mesh(mesh_in_dir, processed_out_dir)
+    for m in tqdm(mesh_in_dirs):
+        process_mesh(m, processed_out_dir)
+
+
+if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-n', '--num_proc', default=1, type=int)
+    parser.add_argument('-p', '--proc', default=0, type=int)
+
+    args = parser.parse_args()
+    all_export(args.proc, args.num_proc)
