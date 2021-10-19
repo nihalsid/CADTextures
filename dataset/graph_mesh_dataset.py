@@ -211,9 +211,13 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         image = np.zeros((128, 128, 3), dtype=np.float32)
         for i in range(127, -1, -1):
             for j in range(128):
-                image[i, j, :] = (face_colors[self.sort_indices[sort_index_i], :3] + face_colors[self.sort_indices[sort_index_i + 128], :3]) / 2
+                # nihalsid: for tri face
+                # image[i, j, :] = (face_colors[self.sort_indices[sort_index_i], :3] + face_colors[self.sort_indices[sort_index_i + 128], :3]) / 2
+                # nihalsid: for quad face
+                image[i, j, :] = face_colors[self.sort_indices[sort_index_i], :3]
                 sort_index_i += 1
-            sort_index_i += 128
+            # nihalsid: for tri face
+            # sort_index_i += 128
         return torch.from_numpy(image).permute((2, 0, 1))
 
 

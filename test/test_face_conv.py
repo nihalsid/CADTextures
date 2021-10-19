@@ -2,21 +2,21 @@ import torch
 from model.graphnet import BigFaceEncoderDecoder, FaceConv
 
 
-pt_data = torch.load("data/SingleShape/CubeTexturePlane_FC_processed/coloredbrodatz_D48_COLORED_000_000.pt")
+pt_data = torch.load("data/SingleShape/CubeTexturePlaneQuad_FC_processed/coloredbrodatz_D48_COLORED_000_000.pt")
 
 
 def test_face_conv():
     x = torch.cat([pt_data['input_colors'], pt_data['valid_input_colors'].unsqueeze(-1)], 1)
     face_neighborhood = pt_data['conv_data'][0][0]
     pad_size = pt_data['conv_data'][0][2].shape[0]
-    fc = FaceConv(4, 64)
+    fc = FaceConv(4, 64, 8)
     out = fc(x, face_neighborhood, pad_size)
     print(out.shape)
 
 
 def test_big_encoder_decoder():
     from util.misc import print_model_parameter_count
-    model = BigFaceEncoderDecoder(4, 3, 128)
+    model = BigFaceEncoderDecoder(4, 3, 128, 8)
     print(model)
     print_model_parameter_count(model)
     x = torch.cat([pt_data['input_colors'], pt_data['valid_input_colors'].unsqueeze(-1)], 1)
@@ -29,4 +29,4 @@ def test_big_encoder_decoder():
 
 
 if __name__ == '__main__':
-    test_face_conv()
+    test_big_encoder_decoder()

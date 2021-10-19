@@ -15,4 +15,4 @@
 
 cd /rhome/ysiddiqui/CADTextures/
 
-python trainer/train_graphnet.py experiment=planequad_graph_bigencdec wandb_main=True
+python trainer/train_graphnet.py experiment=plane_triface_bigencdec wandb_main=True

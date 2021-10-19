@@ -27,7 +27,7 @@ def GraphNetTrainer(config, logger):
     # model = GraphSAGENet(3 + 3 + 1 + 6, 3, 256, 0)
     # model = GraphSAGEEncoderDecoder(3 + 3 + 1 + 6, 3, 64)
     # model = BigGraphSAGEEncoderDecoder(3 + 3 + 1, 3, 128, 'max')
-    model = BigFaceEncoderDecoder(3 + 3 + 1, 3, 128)
+    model = BigFaceEncoderDecoder(3 + 3 + 1, 3, 128, 8)
     # model = GCNNet(63 + 3 + 1 + 6, 3, 256, 0)
     # wandb.watch(model, log='all')
 
@@ -133,6 +133,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
                 loss_total_val_l2 += (l2_criterion.calculate_loss(prediction, sample_val.y).mean(dim=1) * mask).mean().item()
                 prediction_as_image = valdataset.plane_to_image((prediction * mask.unsqueeze(-1)).cpu().numpy()).unsqueeze(0).to(prediction.device)
                 target_as_image = valdataset.plane_to_image((sample_val.y * mask.unsqueeze(-1)).cpu().numpy()).unsqueeze(0).to(prediction.device)
+                # nihalsid: test image readoff from plane
                 # Image.fromarray(((prediction_as_image.squeeze(0).permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save("prediction.jpg")
                 # Image.fromarray(((target_as_image.squeeze(0).permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save("target.jpg")
                 with torch.no_grad():

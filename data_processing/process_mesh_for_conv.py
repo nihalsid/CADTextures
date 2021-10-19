@@ -10,47 +10,119 @@ from util.misc import read_list
 
 
 def get_face_neighbors(mesh):
-    face_neighbors = [[-1, -1, -1] for _ in range(mesh.faces.shape[0])]
+    face_neighbors = [[-1 for _1 in range(mesh.faces.shape[1])] for _0 in range(mesh.faces.shape[0])]
     edge_faces = defaultdict(list)
     for f_idx in range(mesh.faces.shape[0]):
-        v_0, v_1, v_2 = mesh.faces[f_idx]
-        edge_faces[frozenset({v_0, v_1})].append(f_idx)
-        edge_faces[frozenset({v_1, v_2})].append(f_idx)
-        edge_faces[frozenset({v_2, v_0})].append(f_idx)
+        v_ = mesh.faces[f_idx]
+        for _i in range(len(v_)):
+            edge_faces[frozenset({v_[_i], v_[(_i + 1) % len(v_)]})].append(f_idx)
 
     for f_idx in range(mesh.faces.shape[0]):
-        v_0, v_1, v_2 = mesh.faces[f_idx]
-        for neighbor_face in edge_faces[frozenset({v_0, v_1})] + edge_faces[frozenset({v_1, v_2})] + edge_faces[frozenset({v_2, v_0})]:
+        v_ = mesh.faces[f_idx]
+        current_edge_faces = []
+        for _i in range(len(v_)):
+            current_edge_faces.extend(edge_faces[frozenset({v_[_i], v_[(_i + 1) % len(v_)]})])
+        for neighbor_face in current_edge_faces:
             if neighbor_face != f_idx:
-                if neighbor_face in edge_faces[frozenset({v_0, v_1})]:
-                    face_neighbors[f_idx][0] = neighbor_face
-                elif neighbor_face in edge_faces[frozenset({v_1, v_2})]:
-                    face_neighbors[f_idx][1] = neighbor_face
-                elif neighbor_face in edge_faces[frozenset({v_2, v_0})]:
-                    face_neighbors[f_idx][2] = neighbor_face
+                for _i in range(len(v_)):
+                    if neighbor_face in edge_faces[frozenset({v_[_i], v_[(_i + 1) % len(v_)]})]:
+                        face_neighbors[f_idx][_i] = neighbor_face
+                        break
 
     # create padding - new faces and new vertices
     new_faces = []
     new_vertices = []
     for f_idx in range(mesh.faces.shape[0]):
-        f_0, f_1, f_2 = face_neighbors[f_idx]
-        vi_0, vi_1, vi_2 = mesh.faces[f_idx]
-        v_0, v_1, v_2 = mesh.vertices[vi_0, :], mesh.vertices[vi_1, :], mesh.vertices[vi_2, :]
-        if f_0 == -1:
-            new_vertices.append(v_0 + v_1 - v_2)
-            new_faces.append([vi_0, (len(mesh.vertices) - 1) + len(new_vertices), vi_1])
-            face_neighbors[f_idx][0] = mesh.faces.shape[0] + len(new_faces) - 1
-        if f_1 == -1:
-            new_vertices.append(v_1 + v_2 - v_0)
-            new_faces.append([vi_1, (len(mesh.vertices) - 1) + len(new_vertices), vi_2])
-            face_neighbors[f_idx][1] = mesh.faces.shape[0] + len(new_faces) - 1
-        if f_2 == -1:
-            new_vertices.append(v_0 + v_2 - v_1)
-            new_faces.append([vi_0, vi_2, (len(mesh.vertices) - 1) + len(new_vertices)])
-            face_neighbors[f_idx][2] = mesh.faces.shape[0] + len(new_faces) - 1
+        f_ = face_neighbors[f_idx]
+        vi_ = mesh.faces[f_idx]
+        v_ = [mesh.vertices[vi_[_i], :] for _i in range(mesh.faces.shape[1])]
+        for _i in range(mesh.faces.shape[1]):
+            if f_[_i] == -1:
+                if mesh.faces.shape[1] == 3:
+                    new_vertices.append(v_[_i] + v_[(_i + 1) % mesh.faces.shape[1]] - v_[(_i + 2) % mesh.faces.shape[1]])
+                    new_faces.append([vi_[_i], (len(mesh.vertices) - 1) + len(new_vertices), vi_[(_i + 1) % mesh.faces.shape[1]]])
+                    face_neighbors[f_idx][_i] = mesh.faces.shape[0] + len(new_faces) - 1
+                elif mesh.faces.shape[1] == 4:
+                    new_vertices.append(2 * v_[_i] - v_[(_i + 3) % mesh.faces.shape[1]])
+                    new_vertices.append(2 * v_[(_i + 1) % mesh.faces.shape[1]] - v_[(_i + 2) % mesh.faces.shape[1]])
+                    new_faces.append([vi_[_i], (len(mesh.vertices) - 1) + len(new_vertices) - 1,
+                                      (len(mesh.vertices) - 1) + len(new_vertices), vi_[(_i + 1) % mesh.faces.shape[1]]])
+                    face_neighbors[f_idx][_i] = mesh.faces.shape[0] + len(new_faces) - 1
+
     vertices = np.zeros((mesh.vertices.shape[0] + len(new_vertices), 3), dtype=np.float32)
     vertices[:mesh.vertices.shape[0], :] = mesh.vertices
-    faces = np.zeros((mesh.faces.shape[0] + len(new_faces), 3), dtype=np.int64)
+    faces = np.zeros((mesh.faces.shape[0] + len(new_faces), mesh.faces.shape[1]), dtype=np.int64)
+    faces[:mesh.faces.shape[0], :] = mesh.faces
+    is_pad_vertex = np.zeros((mesh.vertices.shape[0] + len(new_vertices)), dtype=np.bool)
+    is_pad_face = np.zeros((mesh.faces.shape[0] + len(new_faces)), dtype=np.bool)
+
+    if len(new_vertices) > 0:
+        vertices[mesh.vertices.shape[0]:, :] = np.array(new_vertices)
+        faces[mesh.faces.shape[0]:, :] = np.array(new_faces)
+        is_pad_vertex[mesh.vertices.shape[0]:] = True
+        is_pad_face[mesh.faces.shape[0]:] = True
+
+    return face_neighbors, vertices, faces, is_pad_vertex, is_pad_face
+
+
+def quadface_8_neighbors(mesh):
+    mod4 = lambda x: x % 4
+    mod8 = lambda x: x % 8
+    face_neighbors = [[-1 for _1 in range(8)] for _0 in range(mesh.faces.shape[0])]
+    edge_faces = defaultdict(list)
+    vertex_faces = [set() for _ in range(mesh.vertices.shape[0])]
+
+    for f_idx in range(mesh.faces.shape[0]):
+        v_ = mesh.faces[f_idx]
+        for _i in range(len(v_)):
+            edge_faces[frozenset({v_[_i], v_[mod4(_i + 1)]})].append(f_idx)
+            vertex_faces[v_[_i]].add(f_idx)
+
+    for f_idx in range(mesh.faces.shape[0]):
+        v_ = mesh.faces[f_idx]
+        current_edge_faces = []
+        for _i in range(len(v_)):
+            current_edge_faces.extend(edge_faces[frozenset({v_[_i], v_[mod4(_i + 1)]})])
+        for neighbor_face in current_edge_faces:
+            if neighbor_face != f_idx:
+                for _i in range(len(v_)):
+                    if neighbor_face in edge_faces[frozenset({v_[_i], v_[mod4(_i + 1)]})]:
+                        face_neighbors[f_idx][mod8(2 * _i)] = neighbor_face
+                        break
+        for _i in range(len(v_)):
+            cur_v_faces = set(vertex_faces[v_[mod4(_i + 1)]])
+            to_remove = {f_idx, face_neighbors[f_idx][mod8(2 * _i)], face_neighbors[f_idx][mod8(2 * _i + 2)]}
+            cur_v_faces = cur_v_faces - to_remove
+            assert len(cur_v_faces) <= 1
+            if len(cur_v_faces) == 1:
+                face_neighbors[f_idx][mod8(2 * _i + 1)] = cur_v_faces.pop()
+
+    # create padding - new faces and new vertices
+    new_faces = []
+    new_vertices = []
+    for f_idx in range(mesh.faces.shape[0]):
+        f_ = face_neighbors[f_idx]
+        vi_ = mesh.faces[f_idx]
+        v_ = [mesh.vertices[vi_[_i], :] for _i in range(mesh.faces.shape[1])]
+        for _i in range(len(vi_)):
+            if f_[mod8(_i * 2)] == -1:
+                new_vertices.append(2 * v_[_i] - v_[mod4(_i + 3)])
+                new_vertices.append(2 * v_[mod4(_i + 1)] - v_[mod4(_i + 2)])
+                new_faces.append([vi_[_i], (len(mesh.vertices) - 1) + len(new_vertices) - 1,
+                                  (len(mesh.vertices) - 1) + len(new_vertices), vi_[mod4(_i + 1)]])
+                face_neighbors[f_idx][mod8(_i * 2)] = mesh.faces.shape[0] + len(new_faces) - 1
+            if f_[mod8(_i * 2 + 1)] == -1:
+                new_vertices.append(2 * v_[mod4(_i + 1)] - v_[mod4(_i + 2)]) #b
+                new_vertices.append(2 * v_[mod4(_i + 1)] - v_[_i]) # d
+                new_vertices.append(new_vertices[-1] + new_vertices[-2] - v_[mod4(_i + 1)]) #c
+                new_faces.append([vi_[mod4(_i + 1)], (len(mesh.vertices) - 1) + len(new_vertices) - 2,
+                                  (len(mesh.vertices) - 1) + len(new_vertices),
+                                  (len(mesh.vertices) - 1) + len(new_vertices) - 1])
+                face_neighbors[f_idx][mod8(_i * 2 + 1)] = mesh.faces.shape[0] + len(new_faces) - 1
+
+    vertices = np.zeros((mesh.vertices.shape[0] + len(new_vertices), 3), dtype=np.float32)
+    vertices[:mesh.vertices.shape[0], :] = mesh.vertices
+    faces = np.zeros((mesh.faces.shape[0] + len(new_faces), mesh.faces.shape[1]), dtype=np.int64)
     faces[:mesh.faces.shape[0], :] = mesh.faces
     is_pad_vertex = np.zeros((mesh.vertices.shape[0] + len(new_vertices)), dtype=np.bool)
     is_pad_face = np.zeros((mesh.faces.shape[0] + len(new_faces)), dtype=np.bool)
@@ -81,8 +153,8 @@ def cartesian_ordering(face_neighbors, faces, vertices):
         return f_num[argmin_global]
 
     for face_neighbor_idx, face_neighbor in enumerate(face_neighbors):
-        least_idx = get_least_index(face_neighbor, list(range(3)), 0)
-        reordered_face_neighbors = [face_neighbor[least_idx], face_neighbor[(least_idx + 1) % 3], face_neighbor[(least_idx + 2) % 3]]
+        least_idx = get_least_index(face_neighbor, list(range(len(face_neighbor))), 0)
+        reordered_face_neighbors = [face_neighbor[(least_idx + i) % len(face_neighbor)] for i in range(len(face_neighbor))]
         face_neighbors[face_neighbor_idx] = reordered_face_neighbors
 
     return face_neighbors
@@ -130,7 +202,7 @@ def process_mesh(mesh_input_directory, output_processed_directory):
         decimations.append(trimesh.load(dec_path, process=False, force='mesh'))
     conv_data = []
     for d in decimations:
-        face_neighbors, vertices, faces, is_pad_vertex, is_pad_face = get_face_neighbors(d)
+        face_neighbors, vertices, faces, is_pad_vertex, is_pad_face = quadface_8_neighbors(d)
         face_neighbors = cartesian_ordering(face_neighbors, faces, vertices)
         face_neighbors = append_self_face(face_neighbors)
         conv_data.append((face_neighbors, vertices, faces, is_pad_vertex, is_pad_face))
@@ -154,7 +226,7 @@ def process_mesh(mesh_input_directory, output_processed_directory):
 
 
 def all_export(proc, n_proc):
-    dataset = "SingleShape/CubeTexturePlane"
+    dataset = "SingleShape/CubeTexturePlaneQuad"
     split = "official"
     items = sorted(list(set(read_list("data/splits/" + dataset + f"/{split}/train.txt") + read_list("data/splits/" + dataset + f"/{split}/val.txt"))))
     print("Length of items: ", len(items))
