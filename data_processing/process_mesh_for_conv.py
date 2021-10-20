@@ -154,6 +154,8 @@ def cartesian_ordering(face_neighbors, faces, vertices):
 
     for face_neighbor_idx, face_neighbor in enumerate(face_neighbors):
         least_idx = get_least_index(face_neighbor, list(range(len(face_neighbor))), 0)
+        if len(face_neighbor) == 8 and least_idx % 2 != 0:  # for 8 neighborhoods, make sure the first weight is not on diagonal side
+            least_idx = (least_idx + 1) % len(face_neighbor)
         reordered_face_neighbors = [face_neighbor[(least_idx + i) % len(face_neighbor)] for i in range(len(face_neighbor))]
         face_neighbors[face_neighbor_idx] = reordered_face_neighbors
 

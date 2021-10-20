@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 from dataset.graph_mesh_dataset import GraphMeshDataset, FaceGraphMeshDataset
 import torch
-from model.graphnet import GATNet, GraphSAGENet, GCNNet, GraphUNet, GraphSAGEEncoderDecoder, BigGraphSAGEEncoderDecoder, BigFaceEncoderDecoder
+from model.graphnet import GATNet, GraphSAGENet, GCNNet, GraphUNet, GraphSAGEEncoderDecoder, BigGraphSAGEEncoderDecoder, BigFaceEncoderDecoder, FaceConv, SymmetricFaceConv, SpatialAttentionConv, WrappedLinear
 from util.feature_loss import FeatureLossHelper
 from util.misc import print_model_parameter_count
 from util.regression_loss import RegressionLossHelper
@@ -26,8 +26,10 @@ def GraphNetTrainer(config, logger):
     # model = GATNet(63 + 3 + 1 + 6, 3, 256, 0)
     # model = GraphSAGENet(3 + 3 + 1 + 6, 3, 256, 0)
     # model = GraphSAGEEncoderDecoder(3 + 3 + 1 + 6, 3, 64)
-    # model = BigGraphSAGEEncoderDecoder(3 + 3 + 1, 3, 128, 'max')
-    model = BigFaceEncoderDecoder(3 + 3 + 1, 3, 128, 8)
+    # model = BigGraphSAGEEncoderDecoder(3 + 3 + 1, 3, 256, 'max')
+    # conv_layer = lambda in_channels, out_channels: FaceConv(in_channels, out_channels, 8)
+    conv_layer = lambda in_channels, out_channels: SpatialAttentionConv(in_channels, out_channels)
+    model = BigFaceEncoderDecoder(3 + 3 + 1, 3, 128, conv_layer, WrappedLinear)
     # model = GCNNet(63 + 3 + 1 + 6, 3, 256, 0)
     # wandb.watch(model, log='all')
 

@@ -1,7 +1,10 @@
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch_scatter
+from torch.nn import init
 from torch_geometric.nn import GATConv, SAGEConv, GCNConv
 from torch_geometric.nn import TopKPooling, GCNConv, BatchNorm, InstanceNorm, GraphNorm
 from torch_geometric.utils import add_self_loops, remove_self_loops, sort_edge_index
@@ -176,7 +179,7 @@ class GraphSAGEEncoderDecoder(nn.Module):
 
 def swish(x):
     # swish
-    return x*torch.sigmoid(x)
+    return x * torch.sigmoid(x)
 
 
 class GResNetBlock(nn.Module):
@@ -310,7 +313,6 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
         self.tanh = nn.Tanh()
 
     def forward(self, x, edge_index, node_counts, pool_maps, sub_edges):
-
         x = self.enc_conv_in(x, edge_index)
         x = self.down_0_block_0(x, edge_index)
         x_0 = self.down_0_block_1(x, edge_index)
@@ -431,6 +433,7 @@ class GraphUNet(torch.nn.Module):
         act (torch.nn.functional, optional): The nonlinearity to use.
             (default: :obj:`torch.nn.functional.relu`)
     """
+
     def __init__(self, in_channels, hidden_channels, out_channels, depth,
                  pool_ratios=0.5, sum_res=True, act=F.relu):
         super(GraphUNet, self).__init__()
@@ -561,19 +564,88 @@ class FaceConv(nn.Module):
         return self.conv(conv_input).squeeze(-1).squeeze(-1)
 
 
+class SpatialAttentionConv(nn.Module):
+
+    @staticmethod
+    def index(x, idx):
+        return x[idx]
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.attention = nn.MultiheadAttention(in_channels, in_channels // 4, batch_first=True)
+        self.conv = nn.Conv2d(in_channels, out_channels, (1, 2))
+
+    def forward(self, x, face_neighborhood, pad_size):
+        padded_x = torch.zeros((pad_size, x.shape[1]), dtype=x.dtype, device=x.device)
+        padded_x[:x.shape[0], :] = x
+        f_ = [self.index(padded_x, face_neighborhood[:, i]) for i in range(9)]
+        key_val = torch.cat([f.unsqueeze(1) for f in f_[1:]], dim=1)
+        h, _ = self.attention(f_[0].unsqueeze(1), key_val, key_val)
+        conv_input = torch.cat([f_[0].unsqueeze(-1).unsqueeze(-1), h.squeeze(1).unsqueeze(-1).unsqueeze(-1)], dim=3)
+        return self.conv(conv_input).squeeze(-1).squeeze(-1)
+
+
+class WrappedLinear(nn.Module):
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.linear = nn.Linear(in_channels, out_channels)
+
+    def forward(self, x, _face_neighborhood, _pad_size):
+        return self.linear(x)
+
+
+class SymmetricFaceConv(nn.Module):
+
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.weight_0 = nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
+        self.weight_1 = nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
+        self.weight_2 = nn.Parameter(torch.empty((out_channels, in_channels, 1, 1)))
+        self.bias = nn.Parameter(torch.empty(out_channels))
+        self.reset_parameters()
+
+    @staticmethod
+    def index(x, idx):
+        return x[idx]
+
+    def reset_parameters(self) -> None:
+        init.kaiming_uniform_(self.weight_0, a=math.sqrt(5))
+        init.kaiming_uniform_(self.weight_1, a=math.sqrt(5))
+        init.kaiming_uniform_(self.weight_2, a=math.sqrt(5))
+        if self.bias is not None:
+            fan_in, _ = init._calculate_fan_in_and_fan_out(torch.empty((self.out_channels, self.in_channels, 1, 9)))
+            bound = 1 / math.sqrt(fan_in)
+            init.uniform_(self.bias, -bound, bound)
+
+    def create_symmetric_conv_filter(self):
+        return torch.cat([self.weight_0, self.weight_1, self.weight_2,
+                          self.weight_1, self.weight_2, self.weight_1,
+                          self.weight_2, self.weight_1, self.weight_2], dim=-1)
+
+    def forward(self, x, face_neighborhood, pad_size):
+        padded_x = torch.zeros((pad_size, x.shape[1]), dtype=x.dtype, device=x.device)
+        padded_x[:x.shape[0], :] = x
+        f_ = [self.index(padded_x, face_neighborhood[:, i]) for i in range(9)]
+        conv_input = torch.cat([f.unsqueeze(-1).unsqueeze(-1) for f in f_], dim=3)
+        return nn.functional.conv2d(conv_input, self.create_symmetric_conv_filter(), self.bias).squeeze(-1).squeeze(-1)
+
+
 class FResNetBlock(nn.Module):
 
-    def __init__(self, nf_in, nf_out, neighborhood, norm, activation):
+    def __init__(self, nf_in, nf_out, conv_layer, norm, activation):
         super().__init__()
         self.nf_in = nf_in
         self.nf_out = nf_out
         self.norm_0 = norm(nf_in)
-        self.conv_0 = FaceConv(nf_in, nf_out, neighborhood)
+        self.conv_0 = conv_layer(nf_in, nf_out)
         self.norm_1 = norm(nf_out)
-        self.conv_1 = FaceConv(nf_out, nf_out, neighborhood)
+        self.conv_1 = conv_layer(nf_out, nf_out)
         self.activation = activation
         if nf_in != nf_out:
-            self.nin_shortcut = FaceConv(nf_in, nf_out, neighborhood)
+            self.nin_shortcut = conv_layer(nf_in, nf_out)
 
     def forward(self, x, face_neighborhood, num_pad):
         h = x
@@ -593,70 +665,71 @@ class FResNetBlock(nn.Module):
 
 class BigFaceEncoderDecoder(nn.Module):
 
-    def __init__(self, in_channels, out_channels, nf, neighborhood):
+    def __init__(self, in_channels, out_channels, nf, conv_layer, input_transform=None):
         super().__init__()
+        if input_transform is None:
+            input_transform = conv_layer
         norm = GraphNorm
         self.activation = nn.LeakyReLU(0.02)
-        self.enc_conv_in = FaceConv(in_channels, nf, neighborhood)
-        self.down_0_block_0 = FResNetBlock(nf, nf, neighborhood, norm, self.activation)
-        self.down_0_block_1 = FResNetBlock(nf, nf, neighborhood, norm, self.activation)
+        self.enc_conv_in = input_transform(in_channels, nf)
+        self.down_0_block_0 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
+        self.down_0_block_1 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
 
-        self.down_1_block_0 = FResNetBlock(nf, nf, neighborhood, norm, self.activation)
-        self.down_1_block_1 = FResNetBlock(nf, nf, neighborhood, norm, self.activation)
+        self.down_1_block_0 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
+        self.down_1_block_1 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
 
-        self.down_2_block_0 = FResNetBlock(nf, nf * 2, neighborhood, norm, self.activation)
-        self.down_2_block_1 = FResNetBlock(nf * 2, nf * 2, neighborhood, norm, self.activation)
+        self.down_2_block_0 = FResNetBlock(nf, nf * 2, conv_layer, norm, self.activation)
+        self.down_2_block_1 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
 
-        self.down_3_block_0 = FResNetBlock(nf * 2, nf * 2, neighborhood, norm, self.activation)
-        self.down_3_block_1 = FResNetBlock(nf * 2, nf * 2, neighborhood, norm, self.activation)
+        self.down_3_block_0 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
+        self.down_3_block_1 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
 
-        self.down_4_block_0 = FResNetBlock(nf * 2, nf * 4, neighborhood, norm, self.activation)
-        self.down_4_block_1 = FResNetBlock(nf * 4, nf * 4, neighborhood, norm, self.activation)
-        # self.down_4_attn_block_0 = GAttnBlock(nf * 4, neighborhood, norm)
-        # self.down_4_attn_block_1 = GAttnBlock(nf * 4, neighborhood, norm)
+        self.down_4_block_0 = FResNetBlock(nf * 2, nf * 4, conv_layer, norm, self.activation)
+        self.down_4_block_1 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
+        # self.down_4_attn_block_0 = GAttnBlock(nf * 4, conv_layer, norm)
+        # self.down_4_attn_block_1 = GAttnBlock(nf * 4, conv_layer, norm)
 
-        self.enc_mid_block_0 = FResNetBlock(nf * 4, nf * 4, neighborhood, norm, self.activation)
-        # self.enc_mid_attn_0 = GAttnBlock(nf * 4, neighborhood, norm)
-        self.enc_mid_block_1 = FResNetBlock(nf * 4, nf * 4, neighborhood, norm, self.activation)
+        self.enc_mid_block_0 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
+        # self.enc_mid_attn_0 = GAttnBlock(nf * 4, conv_layer, norm)
+        self.enc_mid_block_1 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
 
-        self.enc_out_conv = FaceConv(nf * 4, nf * 2, neighborhood)
+        self.enc_out_conv = conv_layer(nf * 4, nf * 2)
         self.enc_out_norm = norm(nf * 4)
 
-        self.dec_conv_in = FaceConv(nf * 2, nf * 4, neighborhood)
+        self.dec_conv_in = conv_layer(nf * 2, nf * 4)
 
-        self.dec_mid_block_0 = FResNetBlock(nf * 4, nf * 4, neighborhood, norm, self.activation)
-        # self.dec_mid_attn_0 = GAttnBlock(nf * 4, neighborhood, norm)
-        self.dec_mid_block_1 = FResNetBlock(nf * 4, nf * 4, neighborhood, norm, self.activation)
+        self.dec_mid_block_0 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
+        # self.dec_mid_attn_0 = GAttnBlock(nf * 4, conv_layer, norm)
+        self.dec_mid_block_1 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
 
-        self.up_0_block_0 = FResNetBlock(nf, nf, neighborhood, norm, self.activation)
-        self.up_0_block_1 = FResNetBlock(nf, nf, neighborhood, norm, self.activation)
-        self.up_0_block_2 = FResNetBlock(nf, nf, neighborhood, norm, self.activation)
+        self.up_0_block_0 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
+        self.up_0_block_1 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
+        self.up_0_block_2 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
 
-        self.up_1_block_0 = FResNetBlock(nf * 2, nf, neighborhood, norm, self.activation)
-        self.up_1_block_1 = FResNetBlock(nf, nf, neighborhood, norm, self.activation)
-        self.up_1_block_2 = FResNetBlock(nf, nf, neighborhood, norm, self.activation)
+        self.up_1_block_0 = FResNetBlock(nf * 2, nf, conv_layer, norm, self.activation)
+        self.up_1_block_1 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
+        self.up_1_block_2 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
 
-        self.up_2_block_0 = FResNetBlock(nf * 2, nf * 2, neighborhood, norm, self.activation)
-        self.up_2_block_1 = FResNetBlock(nf * 2, nf * 2, neighborhood, norm, self.activation)
-        self.up_2_block_2 = FResNetBlock(nf * 2, nf * 2, neighborhood, norm, self.activation)
+        self.up_2_block_0 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
+        self.up_2_block_1 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
+        self.up_2_block_2 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
 
-        self.up_3_block_0 = FResNetBlock(nf * 4, nf * 2, neighborhood, norm, self.activation)
-        self.up_3_block_1 = FResNetBlock(nf * 2, nf * 2, neighborhood, norm, self.activation)
-        self.up_3_block_2 = FResNetBlock(nf * 2, nf * 2, neighborhood, norm, self.activation)
+        self.up_3_block_0 = FResNetBlock(nf * 4, nf * 2, conv_layer, norm, self.activation)
+        self.up_3_block_1 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
+        self.up_3_block_2 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
 
-        self.up_4_block_0 = FResNetBlock(nf * 4, nf * 4, neighborhood, norm, self.activation)
-        self.up_4_block_1 = FResNetBlock(nf * 4, nf * 4, neighborhood, norm, self.activation)
-        self.up_4_block_2 = FResNetBlock(nf * 4, nf * 4, neighborhood, norm, self.activation)
-        # self.up_4_attn_block_0 = GAttnBlock(nf * 4, neighborhood, norm)
-        # self.up_4_attn_block_1 = GAttnBlock(nf * 4, neighborhood, norm)
-        # self.up_4_attn_block_2 = GAttnBlock(nf * 4, neighborhood, norm)
+        self.up_4_block_0 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
+        self.up_4_block_1 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
+        self.up_4_block_2 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
+        # self.up_4_attn_block_0 = GAttnBlock(nf * 4, conv_layer, norm)
+        # self.up_4_attn_block_1 = GAttnBlock(nf * 4, conv_layer, norm)
+        # self.up_4_attn_block_2 = GAttnBlock(nf * 4, conv_layer, norm)
 
         self.dec_out_norm = norm(nf)
-        self.dec_out_conv = FaceConv(nf, out_channels, neighborhood)
+        self.dec_out_conv = conv_layer(nf, out_channels)
         self.tanh = nn.Tanh()
 
     def forward(self, x, face_neighborhood, node_counts, pool_maps, pads, sub_neighborhoods):
-
         x = self.enc_conv_in(x, face_neighborhood, pads[0])
         x = self.down_0_block_0(x, face_neighborhood, pads[0])
         x_0 = self.down_0_block_1(x, face_neighborhood, pads[0])
