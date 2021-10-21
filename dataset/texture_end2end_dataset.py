@@ -19,7 +19,7 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         self.preload = config.dataset.preload
         self.preload_dict = preload_dict
         self.precomputed_retrieval_dir = config.dataset.precomputed_retrieval_dir
-        self.views_per_shape = 1 if (split == 'val' or split == 'val_vis' or split == 'train_vis' or single_view) else config.dataset.views_per_shape
+        self.views_per_shape = 1 if single_view else config.dataset.views_per_shape
         self.unfold = Unfold2D(config.dictionary.patch_size, 3)
         self.context_unfold = Unfold2DWithContext(config.dictionary.patch_size, config.dictionary.patch_size * 2, 3)
         self.texture_map_size = config.dataset.texture_map_size

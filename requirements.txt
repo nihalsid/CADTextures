@@ -37,3 +37,6 @@ wandb
 argparse
 typing
 yaml
+hydra
+lpips
+einops

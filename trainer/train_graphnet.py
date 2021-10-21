@@ -3,6 +3,7 @@ from pathlib import Path
 from random import randint
 
 import hydra
+import lpips
 import wandb
 import numpy as np
 from PIL import Image
@@ -27,20 +28,25 @@ def GraphNetTrainer(config, logger):
     # model = GraphSAGENet(3 + 3 + 1 + 6, 3, 256, 0)
     # model = GraphSAGEEncoderDecoder(3 + 3 + 1 + 6, 3, 64)
     # model = BigGraphSAGEEncoderDecoder(3 + 3 + 1, 3, 256, 'max')
-    # conv_layer = lambda in_channels, out_channels: FaceConv(in_channels, out_channels, 8)
-    conv_layer = lambda in_channels, out_channels: SpatialAttentionConv(in_channels, out_channels)
-    model = BigFaceEncoderDecoder(3 + 3 + 1, 3, 128, conv_layer, WrappedLinear)
-    # model = GCNNet(63 + 3 + 1 + 6, 3, 256, 0)
+    conv_layer = lambda in_channels, out_channels: FaceConv(in_channels, out_channels, 8)
+    # conv_layer = lambda in_channels, out_channels: SymmetricFaceConv(in_channels, out_channels)
+    # conv_layer = lambda in_channels, out_channels: SpatialAttentionConv(in_channels, out_channels)
+    model = BigFaceEncoderDecoder(3 + 3 + 1, 3, 128, conv_layer)
+    # model = BigFaceEncoderDecoder(3 + 3 + 1, 3, 128, conv_layer, WrappedLinear)
+    # model = GCNNet(63 + 3 + 1 + 6, 3, 256 , 0)
     # wandb.watch(model, log='all')
 
     print_model_parameter_count(model)
 
     # create dataloaders
     trainset = FaceGraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
+    # trainset = GraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
 
-    valset = FaceGraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view)
+    valset = FaceGraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view, use_all_views=False)
+    # valset = GraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view, use_all_views=False)
 
     valvisset = FaceGraphMeshDataset(config, 'val_vis', use_single_view=True)
+    # valvisset = GraphMeshDataset(config, 'val_vis', use_single_view=True)
 
     # load model if resuming from checkpoint
     if config.resume is not None:
@@ -62,6 +68,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
     loss_criterion = RegressionLossHelper('l1')
     l1_criterion = RegressionLossHelper('l1')
     l2_criterion = RegressionLossHelper('l2')
+    loss_fn_alex = lpips.LPIPS(net='alex').to(device)
     feature_loss_helper = FeatureLossHelper(['relu4_2'], ['relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1'], 'rgb')
     feature_loss_helper.move_to_device(device)
 
@@ -119,6 +126,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
             loss_total_val_l2 = 0
             content_loss = 0
             style_loss = 0
+            lpips_loss = 0
 
             # forward pass and evaluation for entire validation set
             for sample_val in valdataset:
@@ -135,16 +143,20 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
                 loss_total_val_l2 += (l2_criterion.calculate_loss(prediction, sample_val.y).mean(dim=1) * mask).mean().item()
                 prediction_as_image = valdataset.plane_to_image((prediction * mask.unsqueeze(-1)).cpu().numpy()).unsqueeze(0).to(prediction.device)
                 target_as_image = valdataset.plane_to_image((sample_val.y * mask.unsqueeze(-1)).cpu().numpy()).unsqueeze(0).to(prediction.device)
+
                 # nihalsid: test image readoff from plane
-                # Image.fromarray(((prediction_as_image.squeeze(0).permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save("prediction.jpg")
-                # Image.fromarray(((target_as_image.squeeze(0).permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save("target.jpg")
+                # Path(f"runs/{config.experiment}/visualization/epoch_{epoch:05d}/").mkdir(exist_ok=True, parents=True)
+                # Image.fromarray(((prediction_as_image.squeeze(0).permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'runs/{config.experiment}/visualization/epoch_{epoch:05d}/pred_{sample_val.name}.jpg')
+                # Image.fromarray(((target_as_image.squeeze(0).permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'runs/{config.experiment}/visualization/epoch_{epoch:05d}/tgt_{sample_val.name}.jpg')
+
                 with torch.no_grad():
+                    lpips_loss += loss_fn_alex(target_as_image * 2, prediction_as_image * 2).cpu().item()
                     content_loss += feature_loss_helper.calculate_feature_loss(target_as_image, prediction_as_image).mean().item()
                     style_loss_maps = feature_loss_helper.calculate_style_loss(target_as_image, prediction_as_image)
                     style_loss += np.mean([style_loss_maps[map_idx].mean().item() for map_idx in range(len(style_loss_maps))])
 
             for loss_name, loss_var in [("loss_val_l1", loss_total_val_l1), ("loss_val_l2", loss_total_val_l2),
-                                        ("loss_val_style", style_loss), ("loss_val_content", content_loss)]:
+                                        ("loss_val_style", style_loss), ("loss_val_content", content_loss), ("lpips_loss", lpips_loss)]:
                 print(f'[{epoch:03d}] {loss_name}: {loss_var / len(valdataset):.5f}')
                 logger.log({loss_name: loss_var / len(valdataset), 'iter': epoch * len(traindataset), 'epoch': epoch})
 

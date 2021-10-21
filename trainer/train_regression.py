@@ -45,7 +45,7 @@ class TextureRegressionModule(pl.LightningModule):
         return torch.utils.data.DataLoader(self.train_dataset, batch_size=self.hparams.batch_size, shuffle=True, num_workers=self.hparams.num_workers, drop_last=True, pin_memory=True)
 
     def val_dataloader(self):
-        dataset = self.dataset('train')
+        dataset = self.dataset('val')
         return torch.utils.data.DataLoader(dataset, batch_size=self.hparams.batch_size, shuffle=False, num_workers=self.hparams.num_workers, drop_last=False, pin_memory=True)
 
     def forward(self, batch):
@@ -104,12 +104,11 @@ class TextureRegressionModule(pl.LightningModule):
                 # target_batch = [ds_vis.denormalize_and_rgb(np.transpose(target_batch[i, :, :, :], (1, 2, 0))) for i in range(target_batch.shape[0])]
                 # refinement_batch = refinement.cpu().numpy()
                 # refinement_batch = [ds_vis.denormalize_and_rgb(np.transpose(refinement_batch[i, :, :, :], (1, 2, 0))) for i in range(refinement_batch.shape[0])]
-                #
-                # for bid in range(len(target_batch)):
-                #     Image.fromarray(target_batch[bid]).save(output_dir / "val_vis" / f"tgt_{batch['name'][bid]}.jpg")
-                #     Image.fromarray(refinement_batch[bid]).save(output_dir / "val_vis" / f"pred_{batch['name'][bid]}.jpg")
 
-                # ds_vis.visualize_texture_batch_02(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), refinement.cpu().numpy(), offsets.cpu().numpy(), lambda prefix: output_dir / "val_vis" / f"{prefix}_{batch_idx:04d}.jpg")
+                # for bid in range(len(target_batch)):
+                #     Image.fromarray(target_batch[bid]).save(output_dir / "val_vis" / f"tgt_{batch['name'][bid]}_{batch['view_index'][bid]:03d}_000.jpg")
+                #     Image.fromarray(refinement_batch[bid]).save(output_dir / "val_vis" / f"pred_{batch['name'][bid]}_{batch['view_index'][bid]:03d}_000.jpg")
+
                 ds_vis.visualize_texture_batch_03(batch['partial_texture'].cpu().numpy(), batch['texture'].cpu().numpy(), refinement.cpu().numpy(), lambda prefix: output_dir / "val_vis" / f"{prefix}_{batch_idx:04d}.jpg")
                 total_loss_ref_regression += self.mse_loss(refinement.to(self.device), batch['texture']).cpu().item()
 

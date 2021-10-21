@@ -17,9 +17,10 @@ from util.embedder import get_embedder_nerf
 
 class GraphMeshDataset(Dataset):
 
-    def __init__(self, config, split, use_single_view, transform=None, pre_transform=None, load_to_memory=False):
+    def __init__(self, config, split, use_single_view, transform=None, pre_transform=None, load_to_memory=False, use_all_views=False):
         splits_file = Path(config.dataset.data_dir) / 'splits' / config.dataset.name / config.dataset.splits_dir / f'{split}.txt'
         self.split_name = f'{config.dataset.splits_dir}_{split}'
+        self.use_all_views = use_all_views
         item_list = read_list(splits_file)
         if not config.dataset.plane:
             if use_single_view:
@@ -87,15 +88,21 @@ class GraphMeshDataset(Dataset):
                 torch.save(data, os.path.join(self.processed_dir, f'{self.item_to_name(x)}.pt'))
 
     def len(self):
-        unique_items = list(set([x[0] for x in self.items]))
-        return len(unique_items)
+        if self.use_all_views:
+            return len(self.items)
+        else:
+            unique_items = list(set([x[0] for x in self.items]))
+            return len(unique_items)
 
     def get(self, idx):
         if self.load_to_memory:
             return self.memory[idx]
-        unique_items = list(set([x[0] for x in self.items]))
-        indexed_items = [x for x in self.items if x[0] == unique_items[idx]]
-        selected_item = random.choice(indexed_items)
+        if self.use_all_views:
+            selected_item = self.items[idx]
+        else:
+            unique_items = list(set([x[0] for x in self.items]))
+            indexed_items = [x for x in self.items if x[0] == unique_items[idx]]
+            selected_item = random.choice(indexed_items)
         data = torch.load(os.path.join(self.processed_dir, f'{self.item_to_name(selected_item)}.pt'))
         return data
 
@@ -137,10 +144,11 @@ class GraphMeshDataset(Dataset):
 
 class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
-    def __init__(self, config, split, use_single_view, load_to_memory=False):
+    def __init__(self, config, split, use_single_view, load_to_memory=False, use_all_views=False):
         self.raw_dir = Path(config.dataset.data_dir, config.dataset.name)
         splits_file = Path(config.dataset.data_dir) / 'splits' / config.dataset.name / config.dataset.splits_dir / f'{split}.txt'
         self.split_name = f'{config.dataset.splits_dir}_{split}'
+        self.use_all_views = use_all_views
         item_list = read_list(splits_file)
         if not config.dataset.plane:
             if use_single_view:
@@ -179,15 +187,21 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         return str(Path(self.raw_dir).parent / f'{Path(self.raw_dir).name}_FC_processed')
 
     def __len__(self):
-        unique_items = list(set([x[0] for x in self.items]))
-        return len(unique_items)
+        if self.use_all_views:
+            return len(self.items)
+        else:
+            unique_items = list(set([x[0] for x in self.items]))
+            return len(unique_items)
 
     def __getitem__(self, idx):
         if self.load_to_memory:
             return self.memory[idx]
-        unique_items = list(set([x[0] for x in self.items]))
-        indexed_items = [x for x in self.items if x[0] == unique_items[idx]]
-        selected_item = random.choice(indexed_items)
+        if self.use_all_views:
+            selected_item = self.items[idx]
+        else:
+            unique_items = list(set([x[0] for x in self.items]))
+            indexed_items = [x for x in self.items if x[0] == unique_items[idx]]
+            selected_item = random.choice(indexed_items)
         pt_arxiv = torch.load(os.path.join(self.processed_dir, f'{self.item_to_name(selected_item)}.pt'))
         data = Data(x=torch.cat((pt_arxiv['input_positions'], pt_arxiv['input_colors'], pt_arxiv['valid_input_colors'].reshape(-1, 1)), 1).float(),
                     y=pt_arxiv['target_colors'].float(),
