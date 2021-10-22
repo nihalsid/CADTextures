@@ -145,12 +145,14 @@ def render_and_export(input_path, export_path, proc, num_proc):
 def project_and_export(input_path, proc, num_proc):
     meshes = sorted([(x / "model_normalized.obj") for x in input_path.iterdir() if (x / "model_normalized.obj").exists()], key=lambda x: x.name)
     meshes = [x for i, x in enumerate(meshes) if i % num_proc == proc]
-    # splitlist = Path("data/splits/SingleShape/CubeTexturesForGraph/overfit_050/train.txt").read_text().splitlines()
+    # splitlist = Path("data/splits/SingleShape/CubeTexturesForGraph/overfit_004/train.txt").read_text().splitlines()
     # meshes = [x for x in meshes if x.parent.name in splitlist]
     logger.info(f'Proc {proc + 1}/{num_proc} processing {len(meshes)}')
     for mesh in tqdm(meshes):
+        render_directory = mesh.parent / "render"
+        # render_directory = Path(f"data/SingleShape/CubeTexturesForGraph/{mesh.parent.name}/render")
         mesh_geometry = trimesh.load(mesh, force='mesh', process=False)
-        flat_render_list = sorted([x for x in (mesh.parent / "render").iterdir() if x.name.startswith('flat_')])
+        flat_render_list = sorted([x for x in render_directory.iterdir() if x.name.startswith('flat_')])
         flat_renders, depths, projection_matrices, camera_poses = [], [], [], []
         for fr in flat_render_list:
             flat_render = np.array(Image.open(fr))

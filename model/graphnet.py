@@ -249,8 +249,9 @@ class GAttnBlock(nn.Module):
 
 class BigGraphSAGEEncoderDecoder(nn.Module):
 
-    def __init__(self, in_channels, out_channels, nf, aggr):
+    def __init__(self, in_channels, out_channels, nf, aggr, num_pools=5):
         super().__init__()
+        self.num_pools = num_pools
         norm = GraphNorm
         self.activation = nn.LeakyReLU(0.02)
         self.enc_conv_in = SAGEConv(in_channels, nf, aggr=aggr)
@@ -313,78 +314,90 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
         self.tanh = nn.Tanh()
 
     def forward(self, x, edge_index, node_counts, pool_maps, sub_edges):
+        pool_ctr = 0
         x = self.enc_conv_in(x, edge_index)
         x = self.down_0_block_0(x, edge_index)
         x_0 = self.down_0_block_1(x, edge_index)
-        x = pool(x_0, node_counts[0], pool_maps[0], pool_op='max')
+        x = pool(x_0, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        pool_ctr += 1
 
-        x = self.down_1_block_0(x, sub_edges[0])
-        x_1 = self.down_1_block_1(x, sub_edges[0])
-        x = pool(x_1, node_counts[1], pool_maps[1], pool_op='max')
+        x = self.down_1_block_0(x, sub_edges[pool_ctr - 1])
+        x_1 = self.down_1_block_1(x, sub_edges[pool_ctr - 1])
+        x = pool(x_1, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        pool_ctr += 1
 
-        x = self.down_2_block_0(x, sub_edges[1])
-        x_2 = self.down_2_block_1(x, sub_edges[1])
-        x = pool(x_2, node_counts[2], pool_maps[2], pool_op='max')
+        x = self.down_2_block_0(x, sub_edges[pool_ctr - 1])
+        x_2 = self.down_2_block_1(x, sub_edges[pool_ctr - 1])
+        if self.num_pools == 5:
+            x = pool(x_2, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+            pool_ctr += 1
 
-        x = self.down_3_block_0(x, sub_edges[2])
-        x_3 = self.down_3_block_1(x, sub_edges[2])
-        x = pool(x_3, node_counts[3], pool_maps[3], pool_op='max')
+        x = self.down_3_block_0(x, sub_edges[pool_ctr - 1])
+        x_3 = self.down_3_block_1(x, sub_edges[pool_ctr - 1])
+        x = pool(x_3, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        pool_ctr += 1
 
-        x = self.down_4_block_0(x, sub_edges[3])
+        x = self.down_4_block_0(x, sub_edges[pool_ctr - 1])
         # x = self.down_4_attn_block_0(x)
-        x_4 = self.down_4_block_1(x, sub_edges[3])
+        x_4 = self.down_4_block_1(x, sub_edges[pool_ctr - 1])
         # x = self.down_4_attn_block_1(x)
-        x = pool(x_4, node_counts[4], pool_maps[4], pool_op='max')
+        x = pool(x_4, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        pool_ctr += 1
 
-        x = self.enc_mid_block_0(x, sub_edges[4])
+        x = self.enc_mid_block_0(x, sub_edges[pool_ctr - 1])
         # x = self.enc_mid_attn_0(x)
-        x = self.enc_mid_block_1(x, sub_edges[4])
+        x = self.enc_mid_block_1(x, sub_edges[pool_ctr - 1])
 
         x = self.enc_out_norm(x)
         x = self.activation(x)
-        x = self.enc_out_conv(x, sub_edges[4])
+        x = self.enc_out_conv(x, sub_edges[pool_ctr - 1])
 
-        x = self.dec_conv_in(x, sub_edges[4])
+        x = self.dec_conv_in(x, sub_edges[pool_ctr - 1])
 
-        x = self.dec_mid_block_0(x, sub_edges[4])
+        x = self.dec_mid_block_0(x, sub_edges[pool_ctr - 1])
         # x = self.dec_mid_attn_0(x)
-        x = self.dec_mid_block_1(x, sub_edges[4])
+        x = self.dec_mid_block_1(x, sub_edges[pool_ctr - 1])
 
-        x = self.up_4_block_0(x, sub_edges[4])
+        x = self.up_4_block_0(x, sub_edges[pool_ctr - 1])
         # x = self.up_4_attn_block_0(x)
-        x = self.up_4_block_1(x, sub_edges[4])
+        x = self.up_4_block_1(x, sub_edges[pool_ctr - 1])
         # x = self.up_4_attn_block_1(x)
-        x = self.up_4_block_2(x, sub_edges[4])
+        x = self.up_4_block_2(x, sub_edges[pool_ctr - 1])
         # x = self.up_4_attn_block_2(x)
-        x = unpool(x, pool_maps[4])
-
+        x = unpool(x, pool_maps[pool_ctr - 1])
+        pool_ctr -= 1
         # x = torch.cat([x, x_3], dim=1)
 
-        x = self.up_3_block_0(x, sub_edges[3])
-        x = self.up_3_block_1(x, sub_edges[3])
-        x = self.up_3_block_2(x, sub_edges[3])
-        x = unpool(x, pool_maps[3])
+        x = self.up_3_block_0(x, sub_edges[pool_ctr - 1])
+        x = self.up_3_block_1(x, sub_edges[pool_ctr - 1])
+        x = self.up_3_block_2(x, sub_edges[pool_ctr - 1])
+        x = unpool(x, pool_maps[pool_ctr - 1])
+        pool_ctr -= 1
 
         # x = torch.cat([x, x_2], dim=1)
 
-        x = self.up_2_block_0(x, sub_edges[2])
-        x = self.up_2_block_1(x, sub_edges[2])
-        x = self.up_2_block_2(x, sub_edges[2])
-        x = unpool(x, pool_maps[2])
+        x = self.up_2_block_0(x, sub_edges[pool_ctr - 1])
+        x = self.up_2_block_1(x, sub_edges[pool_ctr - 1])
+        x = self.up_2_block_2(x, sub_edges[pool_ctr - 1])
+        if self.num_pools == 5:
+            x = unpool(x, pool_maps[pool_ctr - 1])
+            pool_ctr -= 1
 
         # x = torch.cat([x, x_1], dim=1)
 
-        x = self.up_1_block_0(x, sub_edges[1])
-        x = self.up_1_block_1(x, sub_edges[1])
-        x = self.up_1_block_2(x, sub_edges[1])
-        x = unpool(x, pool_maps[1])
+        x = self.up_1_block_0(x, sub_edges[pool_ctr - 1])
+        x = self.up_1_block_1(x, sub_edges[pool_ctr - 1])
+        x = self.up_1_block_2(x, sub_edges[pool_ctr - 1])
+        x = unpool(x, pool_maps[pool_ctr - 1])
+        pool_ctr -= 1
 
         # x = torch.cat([x, x_0], dim=1)
 
-        x = self.up_0_block_0(x, sub_edges[0])
-        x = self.up_0_block_1(x, sub_edges[0])
-        x = self.up_0_block_2(x, sub_edges[0])
-        x = unpool(x, pool_maps[0])
+        x = self.up_0_block_0(x, sub_edges[pool_ctr - 1])
+        x = self.up_0_block_1(x, sub_edges[pool_ctr - 1])
+        x = self.up_0_block_2(x, sub_edges[pool_ctr - 1])
+        x = unpool(x, pool_maps[pool_ctr - 1])
+        pool_ctr -= 1
 
         x = self.dec_out_norm(x)
         x = self.activation(x)
@@ -665,10 +678,11 @@ class FResNetBlock(nn.Module):
 
 class BigFaceEncoderDecoder(nn.Module):
 
-    def __init__(self, in_channels, out_channels, nf, conv_layer, input_transform=None):
+    def __init__(self, in_channels, out_channels, nf, conv_layer, input_transform=None, num_pools=5):
         super().__init__()
         if input_transform is None:
             input_transform = conv_layer
+        self.num_pools = num_pools
         norm = GraphNorm
         self.activation = nn.LeakyReLU(0.02)
         self.enc_conv_in = input_transform(in_channels, nf)
@@ -730,78 +744,91 @@ class BigFaceEncoderDecoder(nn.Module):
         self.tanh = nn.Tanh()
 
     def forward(self, x, face_neighborhood, node_counts, pool_maps, pads, sub_neighborhoods):
-        x = self.enc_conv_in(x, face_neighborhood, pads[0])
-        x = self.down_0_block_0(x, face_neighborhood, pads[0])
-        x_0 = self.down_0_block_1(x, face_neighborhood, pads[0])
-        x = pool(x_0, node_counts[0], pool_maps[0], pool_op='max')
+        pool_ctr = 0
+        x = self.enc_conv_in(x, face_neighborhood, pads[pool_ctr])
+        x = self.down_0_block_0(x, face_neighborhood, pads[pool_ctr])
+        x_0 = self.down_0_block_1(x, face_neighborhood, pads[pool_ctr])
+        x = pool(x_0, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        pool_ctr += 1
 
-        x = self.down_1_block_0(x, sub_neighborhoods[0], pads[1])
-        x_1 = self.down_1_block_1(x, sub_neighborhoods[0], pads[1])
-        x = pool(x_1, node_counts[1], pool_maps[1], pool_op='max')
+        x = self.down_1_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x_1 = self.down_1_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = pool(x_1, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        pool_ctr += 1
 
-        x = self.down_2_block_0(x, sub_neighborhoods[1], pads[2])
-        x_2 = self.down_2_block_1(x, sub_neighborhoods[1], pads[2])
-        x = pool(x_2, node_counts[2], pool_maps[2], pool_op='max')
+        x = self.down_2_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x_2 = self.down_2_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        if self.num_pools == 5:
+            x = pool(x_2, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+            pool_ctr += 1
 
-        x = self.down_3_block_0(x, sub_neighborhoods[2], pads[3])
-        x_3 = self.down_3_block_1(x, sub_neighborhoods[2], pads[3])
-        x = pool(x_3, node_counts[3], pool_maps[3], pool_op='max')
+        x = self.down_3_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x_3 = self.down_3_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = pool(x_3, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        pool_ctr += 1
 
-        x = self.down_4_block_0(x, sub_neighborhoods[3], pads[4])
+        x = self.down_4_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
         # x = self.down_4_attn_block_0(x)
-        x_4 = self.down_4_block_1(x, sub_neighborhoods[3], pads[4])
+        x_4 = self.down_4_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
         # x = self.down_4_attn_block_1(x)
-        x = pool(x_4, node_counts[4], pool_maps[4], pool_op='max')
+        x = pool(x_4, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        pool_ctr += 1
 
-        x = self.enc_mid_block_0(x, sub_neighborhoods[4], pads[5])
+        x = self.enc_mid_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
         # x = self.enc_mid_attn_0(x)
-        x = self.enc_mid_block_1(x, sub_neighborhoods[4], pads[5])
+        x = self.enc_mid_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
 
         x = self.enc_out_norm(x)
         x = self.activation(x)
-        x = self.enc_out_conv(x, sub_neighborhoods[4], pads[5])
+        x = self.enc_out_conv(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
 
-        x = self.dec_conv_in(x, sub_neighborhoods[4], pads[5])
+        x = self.dec_conv_in(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
 
-        x = self.dec_mid_block_0(x, sub_neighborhoods[4], pads[5])
+        x = self.dec_mid_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
         # x = self.dec_mid_attn_0(x)
-        x = self.dec_mid_block_1(x, sub_neighborhoods[4], pads[5])
+        x = self.dec_mid_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
 
-        x = self.up_4_block_0(x, sub_neighborhoods[4], pads[5])
+        x = self.up_4_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
         # x = self.up_4_attn_block_0(x)
-        x = self.up_4_block_1(x, sub_neighborhoods[4], pads[5])
+        x = self.up_4_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
         # x = self.up_4_attn_block_1(x)
-        x = self.up_4_block_2(x, sub_neighborhoods[4], pads[5])
+        x = self.up_4_block_2(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
         # x = self.up_4_attn_block_2(x)
-        x = unpool(x, pool_maps[4])
+        x = unpool(x, pool_maps[pool_ctr - 1])
+        pool_ctr -= 1
 
         # x = torch.cat([x, x_3], dim=1)
 
-        x = self.up_3_block_0(x, sub_neighborhoods[3], pads[4])
-        x = self.up_3_block_1(x, sub_neighborhoods[3], pads[4])
-        x = self.up_3_block_2(x, sub_neighborhoods[3], pads[4])
-        x = unpool(x, pool_maps[3])
+        x = self.up_3_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.up_3_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.up_3_block_2(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = unpool(x, pool_maps[pool_ctr - 1])
+        pool_ctr -= 1
 
         # x = torch.cat([x, x_2], dim=1)
 
-        x = self.up_2_block_0(x, sub_neighborhoods[2], pads[3])
-        x = self.up_2_block_1(x, sub_neighborhoods[2], pads[3])
-        x = self.up_2_block_2(x, sub_neighborhoods[2], pads[3])
-        x = unpool(x, pool_maps[2])
+        x = self.up_2_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.up_2_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.up_2_block_2(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        if self.num_pools == 5:
+            x = unpool(x, pool_maps[pool_ctr - 1])
+            pool_ctr -= 1
 
         # x = torch.cat([x, x_1], dim=1)
 
-        x = self.up_1_block_0(x, sub_neighborhoods[1], pads[2])
-        x = self.up_1_block_1(x, sub_neighborhoods[1], pads[2])
-        x = self.up_1_block_2(x, sub_neighborhoods[1], pads[2])
-        x = unpool(x, pool_maps[1])
+        x = self.up_1_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.up_1_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.up_1_block_2(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = unpool(x, pool_maps[pool_ctr - 1])
+        pool_ctr -= 1
 
         # x = torch.cat([x, x_0], dim=1)
 
-        x = self.up_0_block_0(x, sub_neighborhoods[0], pads[1])
-        x = self.up_0_block_1(x, sub_neighborhoods[0], pads[1])
-        x = self.up_0_block_2(x, sub_neighborhoods[0], pads[1])
-        x = unpool(x, pool_maps[0])
+        x = self.up_0_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.up_0_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.up_0_block_2(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = unpool(x, pool_maps[pool_ctr - 1])
+        pool_ctr -= 1
 
         x = self.dec_out_norm(x)
         x = self.activation(x)

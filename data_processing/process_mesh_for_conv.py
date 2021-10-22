@@ -190,12 +190,27 @@ def calculate_face_hierarchies(decimation_mesh):
     return pool_down_locations
 
 
+def get_mesh_src_tgt_paths(input_dir):
+    if mesh_type == "plane":
+        mesh_src_paths = [input_dir / f"inv_partial_texture_{i:03d}.obj" for i in range(12)]
+        mesh_target_path = input_dir / "surface_texture.obj"
+    else:
+        mesh_src_paths = [input_dir / f"model_normalized_input_{x:03d}_{y:03d}.obj" for x in range(225, 60, -45) for y in range(0, 360, 45)]
+        mesh_target_path = input_dir / "model_normalized.obj"
+    return mesh_src_paths, mesh_target_path
+
+
+def get_output_filename_from_inputname(input_dirname, filename):
+    if mesh_type == "plane":
+        trail = filename.split('.obj')[0].split("_")[-1]
+        return f"{input_dirname.name}_{trail}_000.pt"
+    else:
+        trail_0, trail_1 = filename.split('.obj')[0].split("_")[-2:]
+        return f"{input_dirname.name}_{trail_0}_{trail_1}.pt"
+
+
 def process_mesh(mesh_input_directory, output_processed_directory):
-    already_exists = np.all([(output_processed_directory / f"{mesh_input_directory.name}_{i:03d}_000.pt").exists() for i in range(12)])
-    if already_exists:
-        return
-    mesh_src_paths = [mesh_input_directory / f"inv_partial_texture_{i:03d}.obj" for i in range(12)]
-    mesh_target_path = mesh_input_directory / "surface_texture.obj"
+    mesh_src_paths, mesh_target_path = get_mesh_src_tgt_paths(mesh_input_directory)
     decimated_paths = sorted([x for x in Path(mesh_target_path).parent.iterdir() if x.name.startswith('decimate') and x.name.endswith('.obj')])
     decimations = []
     mesh = trimesh.load(mesh_target_path, process=False, force='mesh')
@@ -215,6 +230,7 @@ def process_mesh(mesh_input_directory, output_processed_directory):
         face_colors_src = in_mesh.visual.face_colors
         torch.save({
             "input_positions": torch.from_numpy(in_mesh.triangles.mean(axis=1)).float(),
+            "input_normals": torch.from_numpy(np.array(in_mesh.face_normals)).float(),
             "input_colors": torch.from_numpy(face_colors_src[:, :3]).float() / 255 - 0.5,
             "target_colors": torch.from_numpy(face_colors_target[:, :3]).float() / 255 - 0.5,
             "valid_input_colors": torch.from_numpy(face_colors_src[:, 3]).float() / 255,
@@ -223,12 +239,15 @@ def process_mesh(mesh_input_directory, output_processed_directory):
             "conv_data": [[torch.from_numpy(np.array(cd[0])).long(), torch.from_numpy(cd[1]).float(),
                           torch.from_numpy(cd[2]).long(), torch.from_numpy(cd[3]).bool(),
                           torch.from_numpy(cd[4]).bool()] for cd in conv_data]
-        }, output_processed_directory / f"{mesh_input_directory.name}_{i:03d}_000.pt")
+        }, output_processed_directory / f"{get_output_filename_from_inputname(mesh_input_directory, ms.name)}")
     return
 
 
+mesh_type = "cube"
+
+
 def all_export(proc, n_proc):
-    dataset = "SingleShape/CubeTexturePlaneQuad"
+    dataset = "SingleShape/CubeTexturesForGraphQuad"
     split = "official"
     items = sorted(list(set(read_list("data/splits/" + dataset + f"/{split}/train.txt") + read_list("data/splits/" + dataset + f"/{split}/val.txt"))))
     print("Length of items: ", len(items))

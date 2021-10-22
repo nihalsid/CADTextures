@@ -5,6 +5,7 @@ import torch
 import os
 import random
 
+import torch_scatter
 import trimesh
 from torch_geometric.data import Data, Dataset
 import numpy as np
@@ -30,6 +31,10 @@ class GraphMeshDataset(Dataset):
             self.target_name = "model_normalized.obj"
             self.input_name = lambda x, y: f"model_normalized_input_{x:03d}_{y:03d}.obj"
             self.mask = lambda x: torch.ones((x.shape[0],)).float().to(x.device)
+            split_name = config.dataset.name.split('/')
+            mesh = trimesh.load(Path(config.dataset.data_dir, split_name[0] + '-model', split_name[1]) / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
+            self.vertex_to_uv = np.array(mesh.visual.uv)
+            self.to_image = self.mesh_to_image
         else:
             if use_single_view:
                 self.items = [(item, 0, 0) for item in item_list]
@@ -41,6 +46,7 @@ class GraphMeshDataset(Dataset):
             self.target_valid_area = mesh.visual.vertex_colors[:, 3] == 255
             self.sort_indices = np.lexsort((mesh.vertices[:, 0], mesh.vertices[:, 1], mesh.vertices[:, 2]))
             self.mask = lambda x: torch.from_numpy(self.target_valid_area).float().to(x.device)
+            self.to_image = self.plane_to_image
         self.items = [x for i, x in enumerate(self.items) if i % config.n_proc == config.proc]
         super().__init__(Path(config.dataset.data_dir, config.dataset.name), transform, pre_transform)
         self.memory = []
@@ -112,9 +118,10 @@ class GraphMeshDataset(Dataset):
         # nodes = -1 + (nodes - nodes.min()) / (nodes.max() - nodes.min()) * 2
         # embedder, embedder_out_dim = get_embedder_nerf(10, input_dims=3, i=0)
         # nodes = embedder(torch.from_numpy(nodes)).numpy()
-        # mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1), vertex_features))).float(),
+        mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1), vertex_features))).float(),
                          # mesh_data = Data(x=torch.from_numpy(np.hstack((input_colors, valid_colors.reshape(-1, 1)))).float(),
-        mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1)))).float(),
+                         # nihalsid: for plane image
+                         # mesh_data = Data(x=torch.from_numpy(np.hstack((nodes, input_colors, valid_colors.reshape(-1, 1)))).float(),
                          y=torch.from_numpy(target_colors).float(),
                          edge_index=torch.from_numpy(np.hstack([edges, edges[[1, 0], :]])).long(),
                          edge_attr=torch.from_numpy(np.vstack([edge_features, edge_features])).float(),
@@ -141,6 +148,14 @@ class GraphMeshDataset(Dataset):
             sort_index_i += 1
         return torch.from_numpy(image).permute((2, 0, 1))
 
+    def mesh_to_image(self, vertex_colors):
+        image = np.zeros((128, 128, 3), dtype=np.float32)
+        for v_idx in range(vertex_colors.shape[0]):
+            j = int(round(self.vertex_to_uv[v_idx][0] * 127))
+            i = 127 - int(round(self.vertex_to_uv[v_idx][1] * 127))
+            image[i, j, :] = vertex_colors[v_idx, :]
+        return torch.from_numpy(image).permute((2, 0, 1))
+
 
 class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
@@ -158,6 +173,16 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             self.target_name = "model_normalized.obj"
             self.input_name = lambda x, y: f"model_normalized_input_{x:03d}_{y:03d}.obj"
             self.mask = lambda x: torch.ones((x.shape[0],)).float().to(x.device)
+            split_name = config.dataset.name.split('/')
+            mesh = trimesh.load(Path(config.dataset.data_dir, split_name[0] + '-model', split_name[1]) / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
+            vertex_to_uv = np.array(mesh.visual.uv)
+            faces_to_vertices = np.array(mesh.faces)
+            a = vertex_to_uv[faces_to_vertices[:, 0], :]
+            b = vertex_to_uv[faces_to_vertices[:, 1], :]
+            c = vertex_to_uv[faces_to_vertices[:, 2], :]
+            d = vertex_to_uv[faces_to_vertices[:, 3], :]
+            self.faces_to_uv = (a + b + c + d) / 4
+            self.to_image = self.mesh_to_image
         else:
             if use_single_view:
                 self.items = [(item, 0, 0) for item in item_list]
@@ -170,6 +195,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             mesh_triangle_center = mesh.triangles.mean(axis=1)
             self.sort_indices = np.lexsort((mesh_triangle_center[:, 0], mesh_triangle_center[:, 1], mesh_triangle_center[:, 2]))
             self.mask = lambda x: torch.from_numpy(self.target_valid_area).float().to(x.device)
+            self.to_image = self.plane_to_image
         self.items = [x for i, x in enumerate(self.items) if i % config.n_proc == config.proc]
         self.memory = []
         self.load_to_memory = False
@@ -203,7 +229,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             indexed_items = [x for x in self.items if x[0] == unique_items[idx]]
             selected_item = random.choice(indexed_items)
         pt_arxiv = torch.load(os.path.join(self.processed_dir, f'{self.item_to_name(selected_item)}.pt'))
-        data = Data(x=torch.cat((pt_arxiv['input_positions'], pt_arxiv['input_colors'], pt_arxiv['valid_input_colors'].reshape(-1, 1)), 1).float(),
+        data = Data(x=torch.cat((pt_arxiv['input_positions'], pt_arxiv['input_colors'], pt_arxiv['valid_input_colors'].reshape(-1, 1), pt_arxiv['input_normals']), 1).float(),
                     y=pt_arxiv['target_colors'].float(),
                     edge_index=pt_arxiv['conv_data'][0][0].long(),
                     num_sub_vertices=[pt_arxiv['conv_data'][i][0].shape[0] for i in range(1, len(pt_arxiv['conv_data']))],
@@ -234,10 +260,18 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             # sort_index_i += 128
         return torch.from_numpy(image).permute((2, 0, 1))
 
+    def mesh_to_image(self, face_colors):
+        image = np.zeros((128, 128, 3), dtype=np.float32)
+        for v_idx in range(face_colors.shape[0]):
+            j = int(round(self.faces_to_uv[v_idx][0] * 127))
+            i = 127 - int(round(self.faces_to_uv[v_idx][1] * 127))
+            image[i, j, :] = face_colors[v_idx, :]
+        return torch.from_numpy(image).permute((2, 0, 1))
+
 
 @hydra.main(config_path='../config', config_name='graph_nn')
 def main(config):
-    print(len(GraphMeshDataset(config, 'train', use_single_view=False)))
+    print(len(GraphMeshDataset(config, 'train', use_single_view=True)))
 
 
 if __name__ == '__main__':
