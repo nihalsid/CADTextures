@@ -7,18 +7,21 @@ from PIL import Image
 from tqdm import tqdm
 from cleanfid import fid
 from util.feature_loss import FeatureLossHelper
+from util.misc import read_list
 from util.regression_loss import RegressionLossHelper
 import lpips
 
 
-if __name__ == "__main__":
+path = "/media/nihalsid/OSDisk/Users/ga83fiz/nihalsid/CADTextures/runs/22101356_graphnn_fast_dev/visualization/epoch_00004"
+
+
+def calculate_metrics():
 
     l1_criterion = RegressionLossHelper('l1')
     l2_criterion = RegressionLossHelper('l2')
     loss_fn_alex = lpips.LPIPS(net='alex').cuda()
     feature_loss_helper = FeatureLossHelper(['relu4_2'], ['relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1'], 'rgb')
     feature_loss_helper.move_to_device(torch.device('cuda:0'))
-    path = "/cluster_HDD/gondor/ysiddiqui/CADTextures/runs/20101810_graphnn_plane_quadface_attention_bigencdec/vis_all_epoch34"
     all_items = sorted([x for x in Path(path).iterdir() if x.name.startswith("pred_")])
     mask = np.array(Image.open("data/SingleShape/CubeTextures/coloredbrodatz_D48_COLORED/surface_normals.png").resize((128, 128), Image.NEAREST))
     mask = torch.from_numpy(np.logical_or(np.logical_or(mask[:, :, 0] != 0, mask[:, :, 1] != 0), mask[:, :, 2] != 0).reshape(-1, 1)).float().cuda()
@@ -46,8 +49,28 @@ if __name__ == "__main__":
             content_loss += feature_loss_helper.calculate_feature_loss(target, prediction).mean().item()
             style_loss_maps = feature_loss_helper.calculate_style_loss(target, prediction)
             style_loss += np.mean([style_loss_maps[map_idx].mean().item() for map_idx in range(len(style_loss_maps))])
-    fid = fid.compute_fid("/tmp/fid/real", "/tmp/fid/fake", mode="clean")
+    fid_score = fid.compute_fid("/tmp/fid/real", "/tmp/fid/fake", mode="clean")
     shutil.rmtree("/tmp/fid")
     for loss_name, loss_var in [("l1", loss_total_val_l1), ("l2", loss_total_val_l2), ("content", content_loss), ("style", style_loss * 1e3), ("lpips_loss", lpips_loss)]:
         print(f'{loss_name}: {loss_var / len(all_items):.5f}')
-    print(f"fid: {fid:.5f}")
+    print(f"fid: {fid_score:.5f}")
+
+
+def visualize_results():
+    mask = np.array(Image.open("data/SingleShape/CubeTextures/coloredbrodatz_D48_COLORED/surface_normals.png").resize((128, 128), Image.NEAREST))
+    mask = np.logical_or(np.logical_or(mask[:, :, 0] != 0, mask[:, :, 1] != 0), mask[:, :, 2] != 0).reshape((128, 128, 1))
+    items = sorted(read_list('data/splits/SingleShape/CubeTextures/official/val_vis.txt'))
+    export_ctr = 0
+    image_list = []
+    for item in items:
+        image = (np.array(Image.open(Path(path, f"pred_{item}_000_000.jpg"))) * mask).astype(np.uint8)
+        image_list.append(image)
+        if len(image_list) == 16:
+            Image.fromarray(np.concatenate(image_list, axis=1)).save(f"/home/nihalsid/{export_ctr:03d}.jpg")
+            export_ctr += 1
+            image_list = []
+    Image.fromarray(np.concatenate(image_list, axis=1)).save(f"/home/nihalsid/{export_ctr:03d}.jpg")
+
+
+if __name__ == "__main__":
+    calculate_metrics()

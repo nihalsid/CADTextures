@@ -1,3 +1,4 @@
+import functools
 import random
 from pathlib import Path
 from random import randint
@@ -29,20 +30,26 @@ def GraphNetTrainer(config, logger):
         trainset = GraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
         valset = GraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view, use_all_views=False)
         valvisset = GraphMeshDataset(config, 'val_vis', use_single_view=True)
-        model = BigGraphSAGEEncoderDecoder(3 + 3 + 1 + 6, 3, 256, 'max', num_pools=config.dataset.num_pools)
+        input_feats = 3 + 3 + 1
+        if not config.dataset.plane:
+            input_feats += 6
+        model = BigGraphSAGEEncoderDecoder(input_feats, 3, 256, 'max', num_pools=config.dataset.num_pools)
     else:
         trainset = FaceGraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
         valset = FaceGraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view, use_all_views=False)
         valvisset = FaceGraphMeshDataset(config, 'val_vis', use_single_view=True)
+        input_feats = 3 + 3 + 1
+        if not config.dataset.plane:
+            input_feats += 3
         if config.conv == 'cartesian':
             conv_layer = lambda in_channels, out_channels: FaceConv(in_channels, out_channels, 8)
-            model = BigFaceEncoderDecoder(3 + 3 + 1 + 3, 3, 128, conv_layer, num_pools=config.dataset.num_pools)
+            model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools)
         elif config.conv == 'symmetric':
             conv_layer = lambda in_channels, out_channels: SymmetricFaceConv(in_channels, out_channels)
-            model = BigFaceEncoderDecoder(3 + 3 + 1 + 3, 3, 128, conv_layer, num_pools=config.dataset.num_pools)
+            model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools)
         elif config.conv == 'attention':
             conv_layer = lambda in_channels, out_channels: SpatialAttentionConv(in_channels, out_channels)
-            model = BigFaceEncoderDecoder(3 + 3 + 1 + 3, 3, 128, conv_layer, num_pools=config.dataset.num_pools, input_transform=WrappedLinear)
+            model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools, input_transform=WrappedLinear)
 
     print_model_parameter_count(model)
 
@@ -63,7 +70,6 @@ def GraphNetTrainer(config, logger):
 def train(model, traindataset, valdataset, valvisdataset, device, config, logger):
 
     # declare loss and move to specified device
-    loss_criterion = RegressionLossHelper('l1')
     l1_criterion = RegressionLossHelper('l1')
     l2_criterion = RegressionLossHelper('l2')
     loss_fn_alex = lpips.LPIPS(net='alex').to(device)
@@ -71,13 +77,14 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
     feature_loss_helper.move_to_device(device)
 
     # declare optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
 
     # set model to train, important if your network has e.g. dropout or batchnorm layers
     model.train()
 
     # keep track of running average of train loss for printing
     train_loss_running = 0.
+    train_loss_running_total = 0.
 
     for epoch in range(config.max_epoch):
 
@@ -98,7 +105,17 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
                 prediction = model(sample.x, sample.edge_index, sample.num_sub_vertices, sample.pool_maps, sample.pad_sizes, sample.sub_edges)
 
             # compute loss
-            loss_total = (loss_criterion.calculate_loss(prediction[:sample.y.shape[0], :], sample.y).mean(dim=1) * traindataset.mask(sample.y)).mean()
+            mask = traindataset.mask(sample.y)
+            loss_l1 = (l1_criterion.calculate_loss(prediction[:sample.y.shape[0], :], sample.y).mean(dim=1) * mask).mean()
+
+            prediction_as_image = traindataset.to_image((prediction * mask.unsqueeze(-1))).unsqueeze(0)
+            target_as_image = traindataset.to_image((sample.y * mask.unsqueeze(-1))).unsqueeze(0)
+
+            loss_content = feature_loss_helper.calculate_feature_loss(target_as_image, prediction_as_image).mean()
+            loss_maps_style = feature_loss_helper.calculate_style_loss(target_as_image, prediction_as_image)
+            loss_style = functools.reduce(lambda x, y: x + y, [loss_maps_style[map_idx].mean() for map_idx in range(len(loss_maps_style))]) / len(loss_maps_style)
+
+            loss_total = config.w_l1 * loss_l1 + config.w_content * loss_content + config.w_style * loss_style
 
             # compute gradients on loss_total
             loss_total.backward()
@@ -107,14 +124,18 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
             optimizer.step()
 
             # loss logging
-            train_loss_running += loss_total.item()
+            train_loss_running += loss_l1.item()
+            train_loss_running_total += loss_total.item()
+
             iteration = epoch * len(traindataset) + iter_idx
 
             if iteration % config.print_interval == (config.print_interval - 1):
                 last_train_loss = train_loss_running / config.print_interval
+                last_train_loss_total = train_loss_running_total / config.print_interval
                 logger.log({'loss_train': last_train_loss, 'iter': iteration, 'epoch': epoch})
+                logger.log({'loss_train_total': last_train_loss_total, 'iter': iteration, 'epoch': epoch})
                 train_loss_running = 0.
-                pbar.set_postfix({'loss': f'{last_train_loss:.4f}'})
+                pbar.set_postfix({'loss': f'{last_train_loss_total:.4f}'})
 
         # validation evaluation and logging
         if epoch % config.val_check_interval == (config.val_check_interval - 1):
@@ -143,8 +164,8 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
                 mask = valdataset.mask(sample_val.y)
                 loss_total_val_l1 += (l1_criterion.calculate_loss(prediction, sample_val.y).mean(dim=1) * mask).mean().item()
                 loss_total_val_l2 += (l2_criterion.calculate_loss(prediction, sample_val.y).mean(dim=1) * mask).mean().item()
-                prediction_as_image = valdataset.to_image((prediction * mask.unsqueeze(-1)).cpu().numpy()).unsqueeze(0).to(prediction.device)
-                target_as_image = valdataset.to_image((sample_val.y * mask.unsqueeze(-1)).cpu().numpy()).unsqueeze(0).to(prediction.device)
+                prediction_as_image = valdataset.to_image((prediction * mask.unsqueeze(-1))).unsqueeze(0)
+                target_as_image = valdataset.to_image((sample_val.y * mask.unsqueeze(-1))).unsqueeze(0)
 
                 # nihalsid: test image readoff from plane
                 # Path(f"runs/{config.experiment}/visualization/epoch_{epoch:05d}/").mkdir(exist_ok=True, parents=True)
