@@ -135,6 +135,7 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
                 logger.log({'loss_train': last_train_loss, 'iter': iteration, 'epoch': epoch})
                 logger.log({'loss_train_total': last_train_loss_total, 'iter': iteration, 'epoch': epoch})
                 train_loss_running = 0.
+                train_loss_running_total = 0.
                 pbar.set_postfix({'loss': f'{last_train_loss_total:.4f}'})
 
         # validation evaluation and logging
