@@ -5,3 +5,4 @@ data_dir: 'data'
 splits_dir: 'official'
 memory: False
 plane: False
+num_pools: 4

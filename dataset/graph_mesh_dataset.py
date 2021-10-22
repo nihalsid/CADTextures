@@ -271,7 +271,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
 @hydra.main(config_path='../config', config_name='graph_nn')
 def main(config):
-    print(len(GraphMeshDataset(config, 'train', use_single_view=True)))
+    print(len(GraphMeshDataset(config, 'val', use_single_view=False)))
 
 
 if __name__ == '__main__':

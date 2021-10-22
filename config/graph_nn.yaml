@@ -21,6 +21,9 @@ n_proc: 1
 wandb_main: False
 suffix: ''
 
+method: face
+conv: attention
+
 hydra:
   output_subdir: null # Disable saving of config files. We'll do that ourselves.
   run:

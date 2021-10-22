@@ -5,3 +5,4 @@ data_dir: 'data'
 splits_dir: 'overfit_025_train'
 memory: True
 plane: False
+num_pools: 4

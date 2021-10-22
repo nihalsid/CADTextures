@@ -22,31 +22,29 @@ def GraphNetTrainer(config, logger):
 
     # declare device
     device = torch.device('cuda:0')
+    model = None
 
     # instantiate model
-    # model = GATNet(63 + 3 + 1 + 6, 3, 256, 0)
-    # model = GraphSAGENet(3 + 3 + 1 + 6, 3, 256, 0)
-    # model = GraphSAGEEncoderDecoder(3 + 3 + 1 + 6, 3, 64)
-    # model = BigGraphSAGEEncoderDecoder(3 + 3 + 1 + 6, 3, 256, 'max', num_pools=4)
-    conv_layer = lambda in_channels, out_channels: FaceConv(in_channels, out_channels, 8)
-    # conv_layer = lambda in_channels, out_channels: SymmetricFaceConv(in_channels, out_channels)
-    # conv_layer = lambda in_channels, out_channels: SpatialAttentionConv(in_channels, out_channels)
-    model = BigFaceEncoderDecoder(3 + 3 + 1 + 3, 3, 128, conv_layer, num_pools=4)
-    # model = BigFaceEncoderDecoder(3 + 3 + 1, 3, 128, conv_layer, WrappedLinear)
-    # model = GCNNet(63 + 3 + 1 + 6, 3, 256 , 0)
-    # wandb.watch(model, log='all')
+    if config.method == 'graph':
+        trainset = GraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
+        valset = GraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view, use_all_views=False)
+        valvisset = GraphMeshDataset(config, 'val_vis', use_single_view=True)
+        model = BigGraphSAGEEncoderDecoder(3 + 3 + 1 + 6, 3, 256, 'max', num_pools=config.dataset.num_pools)
+    else:
+        trainset = FaceGraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
+        valset = FaceGraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view, use_all_views=False)
+        valvisset = FaceGraphMeshDataset(config, 'val_vis', use_single_view=True)
+        if config.conv == 'cartesian':
+            conv_layer = lambda in_channels, out_channels: FaceConv(in_channels, out_channels, 8)
+            model = BigFaceEncoderDecoder(3 + 3 + 1 + 3, 3, 128, conv_layer, num_pools=config.dataset.num_pools)
+        elif config.conv == 'symmetric':
+            conv_layer = lambda in_channels, out_channels: SymmetricFaceConv(in_channels, out_channels)
+            model = BigFaceEncoderDecoder(3 + 3 + 1 + 3, 3, 128, conv_layer, num_pools=config.dataset.num_pools)
+        elif config.conv == 'attention':
+            conv_layer = lambda in_channels, out_channels: SpatialAttentionConv(in_channels, out_channels)
+            model = BigFaceEncoderDecoder(3 + 3 + 1 + 3, 3, 128, conv_layer, num_pools=config.dataset.num_pools, input_transform=WrappedLinear)
 
     print_model_parameter_count(model)
-
-    # create dataloaders
-    trainset = FaceGraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
-    # trainset = GraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
-
-    valset = FaceGraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view, use_all_views=False)
-    # valset = GraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view, use_all_views=False)
-
-    valvisset = FaceGraphMeshDataset(config, 'val_vis', use_single_view=True)
-    # valvisset = GraphMeshDataset(config, 'val_vis', use_single_view=True)
 
     # load model if resuming from checkpoint
     if config.resume is not None:
@@ -94,8 +92,10 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
             optimizer.zero_grad()
 
             # forward pass
-            # prediction = model(sample.x, sample.edge_index, sample.num_sub_vertices, sample.pool_maps, sample.sub_edges)
-            prediction = model(sample.x, sample.edge_index, sample.num_sub_vertices, sample.pool_maps, sample.pad_sizes, sample.sub_edges)
+            if config.method == 'graph':
+                prediction = model(sample.x, sample.edge_index, sample.num_sub_vertices, sample.pool_maps, sample.sub_edges)
+            else:
+                prediction = model(sample.x, sample.edge_index, sample.num_sub_vertices, sample.pool_maps, sample.pad_sizes, sample.sub_edges)
 
             # compute loss
             loss_total = (loss_criterion.calculate_loss(prediction[:sample.y.shape[0], :], sample.y).mean(dim=1) * traindataset.mask(sample.y)).mean()
@@ -134,8 +134,10 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
                 sample_val = sample_val.to(device)
 
                 with torch.no_grad():
-                    # prediction = model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.sub_edges)
-                    prediction = model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.pad_sizes, sample_val.sub_edges)
+                    if config.method == 'graph':
+                        prediction = model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.sub_edges)
+                    else:
+                        prediction = model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.pad_sizes, sample_val.sub_edges)
                     prediction = prediction[:sample_val.y.shape[0], :]
 
                 mask = valdataset.mask(sample_val.y)
@@ -167,8 +169,10 @@ def train(model, traindataset, valdataset, valvisdataset, device, config, logger
                 sample_val = sample_val.to(device)
 
                 with torch.no_grad():
-                    # prediction = model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.sub_edges)
-                    prediction = model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.pad_sizes, sample_val.sub_edges)
+                    if config.method == 'graph':
+                        prediction = model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.sub_edges)
+                    else:
+                        prediction = model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.pad_sizes, sample_val.sub_edges)
                     prediction = prediction[:sample_val.y.shape[0], :]
 
                 mask = valdataset.mask(sample_val.y).unsqueeze(-1)
