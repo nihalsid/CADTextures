@@ -46,7 +46,7 @@ def inspect_mesh_triface_neighbors():
 
 
 def inspect_mesh_quadface_neighbors():
-    mesh = trimesh.load("test/meshes/quad_plane_xz.obj", process=False, force='mesh')
+    mesh = trimesh.load("test/meshes/quad_torus_min.obj", process=False, force='mesh')
     face_neighbors, vertices, faces, is_pad_vertex, is_pad_face = quadface_8_neighbors(mesh)
     face_neighbors = cartesian_ordering(face_neighbors, faces, vertices)
     print('vertices')

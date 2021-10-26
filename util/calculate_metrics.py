@@ -12,7 +12,7 @@ from util.regression_loss import RegressionLossHelper
 import lpips
 
 
-path = "/media/nihalsid/OSDisk/Users/ga83fiz/nihalsid/CADTextures/runs/22101356_graphnn_fast_dev/visualization/epoch_00004"
+path = "/cluster_HDD/gondor/ysiddiqui/CADTextures/runs/22101737_graphnn_plain_attention_quad_25_0.10_1200/all_vis_model_44.ckpt"
 
 
 def calculate_metrics():
@@ -62,15 +62,19 @@ def visualize_results():
     items = sorted(read_list('data/splits/SingleShape/CubeTextures/official/val_vis.txt'))
     export_ctr = 0
     image_list = []
+    plane_suffix = "_000_000"
+    cube_suffix = "_135_180"
+    prefix = Path(path).parent.name
     for item in items:
-        image = (np.array(Image.open(Path(path, f"pred_{item}_000_000.jpg"))) * mask).astype(np.uint8)
+        image = (np.array(Image.open(Path(path, f"pred_{item}{plane_suffix}.png"))) * mask).astype(np.uint8)
         image_list.append(image)
         if len(image_list) == 16:
-            Image.fromarray(np.concatenate(image_list, axis=1)).save(f"/home/nihalsid/{export_ctr:03d}.jpg")
+            Image.fromarray(np.concatenate(image_list, axis=1)).save(f"/home/nihalsid/{prefix}_{export_ctr:03d}.jpg")
             export_ctr += 1
             image_list = []
-    Image.fromarray(np.concatenate(image_list, axis=1)).save(f"/home/nihalsid/{export_ctr:03d}.jpg")
+    Image.fromarray(np.concatenate(image_list, axis=1)).save(f"/home/nihalsid/{prefix}_{export_ctr:03d}.jpg")
 
 
 if __name__ == "__main__":
     calculate_metrics()
+    visualize_results()

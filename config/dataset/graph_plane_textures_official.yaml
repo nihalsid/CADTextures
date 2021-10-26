@@ -1,8 +1,8 @@
 # @package _group_
-name: 'SingleShape/CubeTexturesForGraphQuad'
+name: 'SingleShape/CubeTexturePlaneQuad'
 single_view: False
 data_dir: 'data'
 splits_dir: 'official'
 memory: False
-plane: False
-num_pools: 4
+plane: True
+num_pools: 5

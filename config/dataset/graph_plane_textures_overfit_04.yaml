@@ -1,0 +1,8 @@
+# @package _group_
+name: 'SingleShape/CubeTexturePlaneQuad'
+single_view: True
+data_dir: 'data'
+splits_dir: 'overfit_004'
+memory: True
+plane: True
+num_pools: 5

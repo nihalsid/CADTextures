@@ -101,3 +101,10 @@ def load_net_for_eval(net, ckpt_path, rename_prefix):
 
 def cosine_decay(x, max_x, start_val, final_val):
     return (0.5 + 0.5 * math.cos(math.pi * min(x, max_x) / max_x)) * (start_val - final_val) + final_val
+
+
+class DotDict(dict):
+    """dot.notation access to dictionary attributes"""
+    __getattr__ = dict.get
+    __setattr__ = dict.__setitem__
+    __delattr__ = dict.__delitem__

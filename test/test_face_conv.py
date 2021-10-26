@@ -1,16 +1,17 @@
 import torch
-from model.graphnet import BigFaceEncoderDecoder, FaceConv
+from model.graphnet import BigFaceEncoderDecoder, FaceConv, SpatialAttentionConv
 
-
-pt_data = torch.load("data/SingleShape/CubeTexturePlaneQuad_FC_processed/coloredbrodatz_D48_COLORED_000_000.pt")
+pt_data = torch.load("data/SingleShape/CubeTexturesForGraphQuad_FC_processed/coloredbrodatz_D48_COLORED_180_270.pt")
 
 
 def test_face_conv():
-    x = torch.cat([pt_data['input_colors'], pt_data['valid_input_colors'].unsqueeze(-1)], 1)
-    face_neighborhood = pt_data['conv_data'][0][0]
-    pad_size = pt_data['conv_data'][0][2].shape[0]
-    fc = FaceConv(4, 64, 8)
-    out = fc(x, face_neighborhood, pad_size)
+    x = torch.zeros((pt_data['conv_data'][4][4].sum(), 1)).float()
+    x[:, 0] = torch.FloatTensor(list(range(1, x.shape[0] + 1))).float()
+    face_neighborhood = pt_data['conv_data'][4][0]
+    is_pad = pt_data['conv_data'][4][4]
+    pad_size = pt_data['conv_data'][4][2].shape[0]
+    fc = SpatialAttentionConv(1, 64)
+    out = fc(x, face_neighborhood, is_pad, pad_size)
     print(out.shape)
 
 
@@ -29,4 +30,4 @@ def test_big_encoder_decoder():
 
 
 if __name__ == '__main__':
-    test_big_encoder_decoder()
+    test_face_conv()

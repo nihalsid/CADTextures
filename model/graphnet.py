@@ -313,95 +313,95 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
         self.dec_out_conv = SAGEConv(nf, out_channels, aggr='max')
         self.tanh = nn.Tanh()
 
-    def forward(self, x, edge_index, node_counts, pool_maps, sub_edges):
+    def forward(self, x, graph_data):
         pool_ctr = 0
-        x = self.enc_conv_in(x, edge_index)
-        x = self.down_0_block_0(x, edge_index)
-        x_0 = self.down_0_block_1(x, edge_index)
-        x = pool(x_0, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        x = self.enc_conv_in(x, graph_data.edge_index)
+        x = self.down_0_block_0(x, graph_data.edge_index)
+        x_0 = self.down_0_block_1(x, graph_data.edge_index)
+        x = pool(x_0, graph_data.node_counts[pool_ctr], graph_data.pool_maps[pool_ctr], pool_op='max')
         pool_ctr += 1
 
-        x = self.down_1_block_0(x, sub_edges[pool_ctr - 1])
-        x_1 = self.down_1_block_1(x, sub_edges[pool_ctr - 1])
-        x = pool(x_1, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        x = self.down_1_block_0(x, graph_data.sub_edges[pool_ctr - 1])
+        x_1 = self.down_1_block_1(x, graph_data.sub_edges[pool_ctr - 1])
+        x = pool(x_1, graph_data.node_counts[pool_ctr], graph_data.pool_maps[pool_ctr], pool_op='max')
         pool_ctr += 1
 
-        x = self.down_2_block_0(x, sub_edges[pool_ctr - 1])
-        x_2 = self.down_2_block_1(x, sub_edges[pool_ctr - 1])
+        x = self.down_2_block_0(x, graph_data.sub_edges[pool_ctr - 1])
+        x_2 = self.down_2_block_1(x, graph_data.sub_edges[pool_ctr - 1])
         if self.num_pools == 5:
-            x = pool(x_2, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+            x = pool(x_2, graph_data.node_counts[pool_ctr], graph_data.pool_maps[pool_ctr], pool_op='max')
             pool_ctr += 1
 
-        x = self.down_3_block_0(x, sub_edges[pool_ctr - 1])
-        x_3 = self.down_3_block_1(x, sub_edges[pool_ctr - 1])
-        x = pool(x_3, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        x = self.down_3_block_0(x, graph_data.sub_edges[pool_ctr - 1])
+        x_3 = self.down_3_block_1(x, graph_data.sub_edges[pool_ctr - 1])
+        x = pool(x_3, graph_data.node_counts[pool_ctr], graph_data.pool_maps[pool_ctr], pool_op='max')
         pool_ctr += 1
 
-        x = self.down_4_block_0(x, sub_edges[pool_ctr - 1])
+        x = self.down_4_block_0(x, graph_data.sub_edges[pool_ctr - 1])
         # x = self.down_4_attn_block_0(x)
-        x_4 = self.down_4_block_1(x, sub_edges[pool_ctr - 1])
+        x_4 = self.down_4_block_1(x, graph_data.sub_edges[pool_ctr - 1])
         # x = self.down_4_attn_block_1(x)
-        x = pool(x_4, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        x = pool(x_4, graph_data.node_counts[pool_ctr], graph_data.pool_maps[pool_ctr], pool_op='max')
         pool_ctr += 1
 
-        x = self.enc_mid_block_0(x, sub_edges[pool_ctr - 1])
+        x = self.enc_mid_block_0(x, graph_data.sub_edges[pool_ctr - 1])
         # x = self.enc_mid_attn_0(x)
-        x = self.enc_mid_block_1(x, sub_edges[pool_ctr - 1])
+        x = self.enc_mid_block_1(x, graph_data.sub_edges[pool_ctr - 1])
 
         x = self.enc_out_norm(x)
         x = self.activation(x)
-        x = self.enc_out_conv(x, sub_edges[pool_ctr - 1])
+        x = self.enc_out_conv(x, graph_data.sub_edges[pool_ctr - 1])
 
-        x = self.dec_conv_in(x, sub_edges[pool_ctr - 1])
+        x = self.dec_conv_in(x, graph_data.sub_edges[pool_ctr - 1])
 
-        x = self.dec_mid_block_0(x, sub_edges[pool_ctr - 1])
+        x = self.dec_mid_block_0(x, graph_data.sub_edges[pool_ctr - 1])
         # x = self.dec_mid_attn_0(x)
-        x = self.dec_mid_block_1(x, sub_edges[pool_ctr - 1])
+        x = self.dec_mid_block_1(x, graph_data.sub_edges[pool_ctr - 1])
 
-        x = self.up_4_block_0(x, sub_edges[pool_ctr - 1])
+        x = self.up_4_block_0(x, graph_data.sub_edges[pool_ctr - 1])
         # x = self.up_4_attn_block_0(x)
-        x = self.up_4_block_1(x, sub_edges[pool_ctr - 1])
+        x = self.up_4_block_1(x, graph_data.sub_edges[pool_ctr - 1])
         # x = self.up_4_attn_block_1(x)
-        x = self.up_4_block_2(x, sub_edges[pool_ctr - 1])
+        x = self.up_4_block_2(x, graph_data.sub_edges[pool_ctr - 1])
         # x = self.up_4_attn_block_2(x)
-        x = unpool(x, pool_maps[pool_ctr - 1])
+        x = unpool(x, graph_data.pool_maps[pool_ctr - 1])
         pool_ctr -= 1
         # x = torch.cat([x, x_3], dim=1)
 
-        x = self.up_3_block_0(x, sub_edges[pool_ctr - 1])
-        x = self.up_3_block_1(x, sub_edges[pool_ctr - 1])
-        x = self.up_3_block_2(x, sub_edges[pool_ctr - 1])
-        x = unpool(x, pool_maps[pool_ctr - 1])
+        x = self.up_3_block_0(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_3_block_1(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_3_block_2(x, graph_data.sub_edges[pool_ctr - 1])
+        x = unpool(x, graph_data.pool_maps[pool_ctr - 1])
         pool_ctr -= 1
 
         # x = torch.cat([x, x_2], dim=1)
 
-        x = self.up_2_block_0(x, sub_edges[pool_ctr - 1])
-        x = self.up_2_block_1(x, sub_edges[pool_ctr - 1])
-        x = self.up_2_block_2(x, sub_edges[pool_ctr - 1])
+        x = self.up_2_block_0(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_2_block_1(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_2_block_2(x, graph_data.sub_edges[pool_ctr - 1])
         if self.num_pools == 5:
-            x = unpool(x, pool_maps[pool_ctr - 1])
+            x = unpool(x, graph_data.pool_maps[pool_ctr - 1])
             pool_ctr -= 1
 
         # x = torch.cat([x, x_1], dim=1)
 
-        x = self.up_1_block_0(x, sub_edges[pool_ctr - 1])
-        x = self.up_1_block_1(x, sub_edges[pool_ctr - 1])
-        x = self.up_1_block_2(x, sub_edges[pool_ctr - 1])
-        x = unpool(x, pool_maps[pool_ctr - 1])
+        x = self.up_1_block_0(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_1_block_1(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_1_block_2(x, graph_data.sub_edges[pool_ctr - 1])
+        x = unpool(x, graph_data.pool_maps[pool_ctr - 1])
         pool_ctr -= 1
 
         # x = torch.cat([x, x_0], dim=1)
 
-        x = self.up_0_block_0(x, sub_edges[pool_ctr - 1])
-        x = self.up_0_block_1(x, sub_edges[pool_ctr - 1])
-        x = self.up_0_block_2(x, sub_edges[pool_ctr - 1])
-        x = unpool(x, pool_maps[pool_ctr - 1])
+        x = self.up_0_block_0(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_0_block_1(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_0_block_2(x, graph_data.sub_edges[pool_ctr - 1])
+        x = unpool(x, graph_data.pool_maps[pool_ctr - 1])
         pool_ctr -= 1
 
         x = self.dec_out_norm(x)
         x = self.activation(x)
-        x = self.dec_out_conv(x, edge_index)
+        x = self.dec_out_conv(x, graph_data.edge_index)
 
         return self.tanh(x) * 0.5
 
@@ -569,7 +569,7 @@ class FaceConv(nn.Module):
         self.neighborhood_size = neighborhood_size
         self.conv = nn.Conv2d(in_channels, out_channels, (1, neighborhood_size + 1), padding=0)
 
-    def forward(self, x, face_neighborhood, pad_size):
+    def forward(self, x, face_neighborhood, _face_is_pad, pad_size):
         padded_x = torch.zeros((pad_size, x.shape[1]), dtype=x.dtype, device=x.device)
         padded_x[:x.shape[0], :] = x
         f_ = [self.index(padded_x, face_neighborhood[:, i]) for i in range(self.neighborhood_size + 1)]
@@ -585,15 +585,17 @@ class SpatialAttentionConv(nn.Module):
 
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.attention = nn.MultiheadAttention(in_channels, in_channels // 4, batch_first=True)
+        self.num_heads = max(1, in_channels // 4)
+        self.attention = nn.MultiheadAttention(in_channels, self.num_heads, batch_first=True)
         self.conv = nn.Conv2d(in_channels, out_channels, (1, 2))
 
-    def forward(self, x, face_neighborhood, pad_size):
+    def forward(self, x, face_neighborhood, face_is_pad, pad_size):
         padded_x = torch.zeros((pad_size, x.shape[1]), dtype=x.dtype, device=x.device)
         padded_x[:x.shape[0], :] = x
         f_ = [self.index(padded_x, face_neighborhood[:, i]) for i in range(9)]
+        is_pad = torch.repeat_interleave(face_is_pad[face_neighborhood[:, 1:]].unsqueeze(1), self.num_heads, dim=0)
         key_val = torch.cat([f.unsqueeze(1) for f in f_[1:]], dim=1)
-        h, _ = self.attention(f_[0].unsqueeze(1), key_val, key_val)
+        h, _ = self.attention(f_[0].unsqueeze(1), key_val, key_val, attn_mask=is_pad)
         conv_input = torch.cat([f_[0].unsqueeze(-1).unsqueeze(-1), h.squeeze(1).unsqueeze(-1).unsqueeze(-1)], dim=3)
         return self.conv(conv_input).squeeze(-1).squeeze(-1)
 
@@ -604,7 +606,7 @@ class WrappedLinear(nn.Module):
         super().__init__()
         self.linear = nn.Linear(in_channels, out_channels)
 
-    def forward(self, x, _face_neighborhood, _pad_size):
+    def forward(self, x, _face_neighborhood, _is_pad, _pad_size):
         return self.linear(x)
 
 
@@ -638,7 +640,7 @@ class SymmetricFaceConv(nn.Module):
                           self.weight_1, self.weight_2, self.weight_1,
                           self.weight_2, self.weight_1, self.weight_2], dim=-1)
 
-    def forward(self, x, face_neighborhood, pad_size):
+    def forward(self, x, face_neighborhood, face_is_pad, pad_size):
         padded_x = torch.zeros((pad_size, x.shape[1]), dtype=x.dtype, device=x.device)
         padded_x[:x.shape[0], :] = x
         f_ = [self.index(padded_x, face_neighborhood[:, i]) for i in range(9)]
@@ -660,18 +662,18 @@ class FResNetBlock(nn.Module):
         if nf_in != nf_out:
             self.nin_shortcut = conv_layer(nf_in, nf_out)
 
-    def forward(self, x, face_neighborhood, num_pad):
+    def forward(self, x, face_neighborhood, face_is_pad, num_pad):
         h = x
         h = self.norm_0(h)
         h = self.activation(h)
-        h = self.conv_0(h, face_neighborhood, num_pad)
+        h = self.conv_0(h, face_neighborhood, face_is_pad, num_pad)
 
         h = self.norm_1(h)
         h = self.activation(h)
-        h = self.conv_1(h, face_neighborhood, num_pad)
+        h = self.conv_1(h, face_neighborhood, face_is_pad, num_pad)
 
         if self.nf_in != self.nf_out:
-            x = self.nin_shortcut(x, face_neighborhood, num_pad)
+            x = self.nin_shortcut(x, face_neighborhood, face_is_pad, num_pad)
 
         return x + h
 
@@ -743,95 +745,95 @@ class BigFaceEncoderDecoder(nn.Module):
         self.dec_out_conv = conv_layer(nf, out_channels)
         self.tanh = nn.Tanh()
 
-    def forward(self, x, face_neighborhood, node_counts, pool_maps, pads, sub_neighborhoods):
+    def forward(self, x, graph_data):
         pool_ctr = 0
-        x = self.enc_conv_in(x, face_neighborhood, pads[pool_ctr])
-        x = self.down_0_block_0(x, face_neighborhood, pads[pool_ctr])
-        x_0 = self.down_0_block_1(x, face_neighborhood, pads[pool_ctr])
-        x = pool(x_0, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        x = self.enc_conv_in(x, graph_data.face_neighborhood, graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = self.down_0_block_0(x, graph_data.face_neighborhood, graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x_0 = self.down_0_block_1(x, graph_data.face_neighborhood, graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = pool(x_0, graph_data.node_counts[pool_ctr], graph_data.pool_maps[pool_ctr], pool_op='max')
         pool_ctr += 1
 
-        x = self.down_1_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x_1 = self.down_1_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x = pool(x_1, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        x = self.down_1_block_0(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x_1 = self.down_1_block_1(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = pool(x_1, graph_data.node_counts[pool_ctr], graph_data.pool_maps[pool_ctr], pool_op='max')
         pool_ctr += 1
 
-        x = self.down_2_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x_2 = self.down_2_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.down_2_block_0(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x_2 = self.down_2_block_1(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
         if self.num_pools == 5:
-            x = pool(x_2, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+            x = pool(x_2, graph_data.node_counts[pool_ctr], graph_data.pool_maps[pool_ctr], pool_op='max')
             pool_ctr += 1
 
-        x = self.down_3_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x_3 = self.down_3_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x = pool(x_3, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        x = self.down_3_block_0(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x_3 = self.down_3_block_1(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = pool(x_3, graph_data.node_counts[pool_ctr], graph_data.pool_maps[pool_ctr], pool_op='max')
         pool_ctr += 1
 
-        x = self.down_4_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.down_4_block_0(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
         # x = self.down_4_attn_block_0(x)
-        x_4 = self.down_4_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x_4 = self.down_4_block_1(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
         # x = self.down_4_attn_block_1(x)
-        x = pool(x_4, node_counts[pool_ctr], pool_maps[pool_ctr], pool_op='max')
+        x = pool(x_4, graph_data.node_counts[pool_ctr], graph_data.pool_maps[pool_ctr], pool_op='max')
         pool_ctr += 1
 
-        x = self.enc_mid_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.enc_mid_block_0(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
         # x = self.enc_mid_attn_0(x)
-        x = self.enc_mid_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.enc_mid_block_1(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
 
         x = self.enc_out_norm(x)
         x = self.activation(x)
-        x = self.enc_out_conv(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.enc_out_conv(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
 
-        x = self.dec_conv_in(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.dec_conv_in(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
 
-        x = self.dec_mid_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.dec_mid_block_0(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
         # x = self.dec_mid_attn_0(x)
-        x = self.dec_mid_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.dec_mid_block_1(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
 
-        x = self.up_4_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.up_4_block_0(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
         # x = self.up_4_attn_block_0(x)
-        x = self.up_4_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.up_4_block_1(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
         # x = self.up_4_attn_block_1(x)
-        x = self.up_4_block_2(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.up_4_block_2(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
         # x = self.up_4_attn_block_2(x)
-        x = unpool(x, pool_maps[pool_ctr - 1])
+        x = unpool(x, graph_data.pool_maps[pool_ctr - 1])
         pool_ctr -= 1
 
         # x = torch.cat([x, x_3], dim=1)
 
-        x = self.up_3_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x = self.up_3_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x = self.up_3_block_2(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x = unpool(x, pool_maps[pool_ctr - 1])
+        x = self.up_3_block_0(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = self.up_3_block_1(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = self.up_3_block_2(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = unpool(x, graph_data.pool_maps[pool_ctr - 1])
         pool_ctr -= 1
 
         # x = torch.cat([x, x_2], dim=1)
 
-        x = self.up_2_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x = self.up_2_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x = self.up_2_block_2(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
+        x = self.up_2_block_0(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = self.up_2_block_1(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = self.up_2_block_2(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
         if self.num_pools == 5:
-            x = unpool(x, pool_maps[pool_ctr - 1])
+            x = unpool(x, graph_data.pool_maps[pool_ctr - 1])
             pool_ctr -= 1
 
         # x = torch.cat([x, x_1], dim=1)
 
-        x = self.up_1_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x = self.up_1_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x = self.up_1_block_2(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x = unpool(x, pool_maps[pool_ctr - 1])
+        x = self.up_1_block_0(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = self.up_1_block_1(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = self.up_1_block_2(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = unpool(x, graph_data.pool_maps[pool_ctr - 1])
         pool_ctr -= 1
 
         # x = torch.cat([x, x_0], dim=1)
 
-        x = self.up_0_block_0(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x = self.up_0_block_1(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x = self.up_0_block_2(x, sub_neighborhoods[pool_ctr - 1], pads[pool_ctr])
-        x = unpool(x, pool_maps[pool_ctr - 1])
+        x = self.up_0_block_0(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = self.up_0_block_1(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = self.up_0_block_2(x, graph_data.sub_neighborhoods[pool_ctr - 1], graph_data.is_pad[pool_ctr], graph_data.pads[pool_ctr])
+        x = unpool(x, graph_data.pool_maps[pool_ctr - 1])
         pool_ctr -= 1
 
         x = self.dec_out_norm(x)
         x = self.activation(x)
-        x = self.dec_out_conv(x, face_neighborhood, pads[0])
+        x = self.dec_out_conv(x, graph_data.face_neighborhood, graph_data.is_pad[0], graph_data.pads[0])
 
         return self.tanh(x) * 0.5

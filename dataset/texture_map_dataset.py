@@ -220,7 +220,7 @@ class TextureMapDataset(Dataset):
         from_rgb = lambda x: x
         if cspace == 'lab':
             to_rgb = lambda x: cspace_convert(x, 'CIELab', 'sRGB255')
-            from_rgb = lambda x: cspace_convert(x[:, :, :3], 'sRGB255', 'CIELab')
+            from_rgb = lambda x: cspace_convert(x[..., :3], 'sRGB255', 'CIELab')
         return from_rgb, to_rgb
 
     @staticmethod

@@ -10,7 +10,7 @@ from torch_geometric.data import Data, Dataset
 from tqdm import tqdm
 
 from util.mesh_proc import mesh_proc
-from util.misc import read_list
+from util.misc import read_list, DotDict
 
 
 class GraphMeshDataset(Dataset):
@@ -93,7 +93,10 @@ class GraphMeshDataset(Dataset):
 
     def len(self):
         if self.use_all_views:
-            return len(self.items)
+            if self.plane_dataset:  # just has 12
+                return len(self.items)
+            else:  # has 32 - don't dump all
+                return len(self.items) // 4
         else:
             unique_items = list(set([x[0] for x in self.items]))
             return len(unique_items)
@@ -102,7 +105,13 @@ class GraphMeshDataset(Dataset):
         if self.load_to_memory:
             return self.memory[idx]
         if self.use_all_views:
-            selected_item = self.items[idx]
+            if self.plane_dataset:
+                selected_item = self.items[idx]
+            else:
+                unique_items = sorted(list(set([x[0] for x in self.items])))
+                xy = [x[1:] for x in self.items if x[0] == unique_items[0]][::4]
+                new_item_list = [(item, x[0], x[1]) for item in unique_items for x in xy]
+                selected_item = new_item_list[idx]
         else:
             unique_items = list(set([x[0] for x in self.items]))
             indexed_items = [x for x in self.items if x[0] == unique_items[idx]]
@@ -153,6 +162,15 @@ class GraphMeshDataset(Dataset):
             i = 127 - int(round(self.vertex_to_uv[v_idx][1] * 127))
             image[:, i, j] = vertex_colors[v_idx, :]
         return image
+
+    @staticmethod
+    def get_item_as_graphdata(sample):
+        return DotDict({
+            'edge_index': sample.edge_index,
+            'sub_edges': sample.sub_edges,
+            'node_counts': sample.num_sub_vertices,
+            'pool_maps': sample.pool_maps,
+        })
 
 
 class FaceGraphMeshDataset(torch.utils.data.Dataset):
@@ -223,7 +241,10 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         if self.use_all_views:
-            return len(self.items)
+            if self.plane_dataset:  # just has 12
+                return len(self.items)
+            else:  # has 32 - don't dump all
+                return len(self.items) // 4
         else:
             unique_items = list(set([x[0] for x in self.items]))
             return len(unique_items)
@@ -232,7 +253,13 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         if self.load_to_memory:
             return self.memory[idx]
         if self.use_all_views:
-            selected_item = self.items[idx]
+            if self.plane_dataset:
+                selected_item = self.items[idx]
+            else:
+                unique_items = sorted(list(set([x[0] for x in self.items])))
+                xy = [x[1:] for x in self.items if x[0] == unique_items[0]][::4]
+                new_item_list = [(item, x[0], x[1]) for item in unique_items for x in xy]
+                selected_item = new_item_list[idx]
         else:
             unique_items = list(set([x[0] for x in self.items]))
             indexed_items = [x for x in self.items if x[0] == unique_items[idx]]
@@ -249,8 +276,20 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
                     pad_sizes=[pt_arxiv['conv_data'][i][2].shape[0] for i in range(len(pt_arxiv['conv_data']))],
                     sub_edges=[pt_arxiv['conv_data'][i][0].long() for i in range(1, len(pt_arxiv['conv_data']))],
                     pool_maps=pt_arxiv['pool_locations'],
+                    is_pad=[pt_arxiv['conv_data'][i][4].bool() for i in range(len(pt_arxiv['conv_data']))],
                     name=f"{self.item_to_name(selected_item)}")
         return data
+
+    @staticmethod
+    def get_item_as_graphdata(sample):
+        return DotDict({
+            'face_neighborhood': sample.edge_index,
+            'sub_neighborhoods': sample.sub_edges,
+            'pads': sample.pad_sizes,
+            'node_counts': sample.num_sub_vertices,
+            'pool_maps': sample.pool_maps,
+            'is_pad': sample.is_pad
+        })
 
     def visualize_graph_with_predictions(self, item, prediction, output_dir, output_suffix):
         output_dir = Path(output_dir)
