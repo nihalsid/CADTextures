@@ -141,14 +141,14 @@ class GraphNetTrainer:
 
                 iteration = epoch * len(self.trainset) + iter_idx
 
-            if iteration % config.print_interval == (config.print_interval - 1):
-                last_train_loss = train_loss_running / config.print_interval
-                last_train_loss_total = train_loss_running_total / config.print_interval
-                logger.log({'loss_train': last_train_loss, 'iter': iteration, 'epoch': epoch})
-                logger.log({'loss_train_total': last_train_loss_total, 'iter': iteration, 'epoch': epoch})
-                train_loss_running = 0.
-                train_loss_running_total = 0.
-                pbar.set_postfix({'loss': f'{last_train_loss_total:.4f}'})
+                if iteration % self.config.print_interval == (self.config.print_interval - 1):
+                    last_train_loss = train_loss_running / self.config.print_interval
+                    last_train_loss_total = train_loss_running_total / self.config.print_interval
+                    self.logger.log({'loss_train': last_train_loss, 'iter': iteration, 'epoch': epoch})
+                    self.logger.log({'loss_train_total': last_train_loss_total, 'iter': iteration, 'epoch': epoch})
+                    train_loss_running = 0.
+                    train_loss_running_total = 0.
+                    pbar.set_postfix({'loss': f'{last_train_loss_total:.4f}'})
 
             # validation evaluation and logging
             if epoch % self.config.val_check_interval == (self.config.val_check_interval - 1):
