@@ -1,25 +1,22 @@
-import functools
 import random
 from pathlib import Path
 from random import randint
 
 import hydra
 import lpips
-import wandb
 import numpy as np
+import torch
+import wandb
 from PIL import Image
 from pytorch_lightning import seed_everything
 from tqdm import tqdm
 
 from dataset.graph_mesh_dataset import GraphMeshDataset, FaceGraphMeshDataset
-import torch
-
 from model.augmentation import rgb_shift, channel_dropout, channel_shuffle, random_gamma, random_brightness_contrast
-from model.graphnet import GATNet, GraphSAGENet, GCNNet, GraphUNet, GraphSAGEEncoderDecoder, BigGraphSAGEEncoderDecoder, BigFaceEncoderDecoder, FaceConv, SymmetricFaceConv, SpatialAttentionConv, WrappedLinear
+from model.graphnet import BigGraphSAGEEncoderDecoder, BigFaceEncoderDecoder, FaceConv, SymmetricFaceConv, SpatialAttentionConv, WrappedLinear
 from util.feature_loss import FeatureLossHelper
 from util.misc import print_model_parameter_count
 from util.regression_loss import RegressionLossHelper
-
 
 torch.backends.cudnn.benchmark = True
 
@@ -81,7 +78,9 @@ class GraphNetTrainer:
         l1_criterion = RegressionLossHelper('l1')
         l2_criterion = RegressionLossHelper('l2')
         loss_fn_alex = lpips.LPIPS(net='alex').to(self.device)
-        feature_loss_helper = FeatureLossHelper([self.config.content_layer], ['relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1'], 'rgb')
+        content_weights = [1 / 8, 1 / 4, 1 / 2, 1]
+        style_weights = [1 / 32, 1 / 16, 1 / 8, 1 / 4]
+        feature_loss_helper = FeatureLossHelper(['relu1_2', 'relu2_2', 'relu3_3', 'relu4_3'], ['relu1_2', 'relu2_2', 'relu3_3', 'relu4_3'], 'rgb')
         feature_loss_helper.move_to_device(self.device)
 
         # declare optimizer
@@ -123,9 +122,15 @@ class GraphNetTrainer:
                 prediction_as_image = self.trainset.to_image((prediction * mask.unsqueeze(-1))).unsqueeze(0)
                 target_as_image = self.trainset.to_image((sample.y * mask.unsqueeze(-1))).unsqueeze(0)
 
-                loss_content = feature_loss_helper.calculate_feature_loss(target_as_image, prediction_as_image).mean()
+                loss_maps_content = feature_loss_helper.calculate_feature_loss(target_as_image, prediction_as_image)
+                loss_content = loss_maps_content[0].mean() * content_weights[0]
+                for loss_map_idx in range(1, len(loss_maps_content)):
+                    loss_content += loss_maps_content[loss_map_idx].mean() * content_weights[loss_map_idx]
+
                 loss_maps_style = feature_loss_helper.calculate_style_loss(target_as_image, prediction_as_image)
-                loss_style = functools.reduce(lambda x, y: x + y, [loss_maps_style[map_idx].mean() for map_idx in range(len(loss_maps_style))]) / len(loss_maps_style)
+                loss_style = loss_maps_style[0].mean() * style_weights[0]
+                for loss_map_idx in range(1, len(loss_maps_style)):
+                    loss_style += loss_maps_style[loss_map_idx].mean() * style_weights[loss_map_idx]
 
                 loss_total = self.config.w_l1 * loss_l1 + self.config.w_content * loss_content + self.config.w_style * loss_style
 
@@ -184,12 +189,19 @@ class GraphNetTrainer:
 
                     with torch.no_grad():
                         lpips_loss += loss_fn_alex(target_as_image * 2, prediction_as_image * 2).cpu().item()
-                        content_loss += feature_loss_helper.calculate_feature_loss(target_as_image, prediction_as_image).mean().item()
-                        style_loss_maps = feature_loss_helper.calculate_style_loss(target_as_image, prediction_as_image)
-                        style_loss += np.mean([style_loss_maps[map_idx].mean().item() for map_idx in range(len(style_loss_maps))])
+
+                        loss_maps_content = feature_loss_helper.calculate_feature_loss(target_as_image, prediction_as_image)
+                        content_loss = loss_maps_content[0].mean().item() * content_weights[0]
+                        for loss_map_idx in range(1, len(loss_maps_content)):
+                            content_loss += loss_maps_content[loss_map_idx].mean().item() * content_weights[loss_map_idx]
+
+                        loss_maps_style = feature_loss_helper.calculate_style_loss(target_as_image, prediction_as_image)
+                        style_loss = loss_maps_style[0].mean().item() * style_weights[0]
+                        for loss_map_idx in range(1, len(loss_maps_style)):
+                            style_loss += loss_maps_style[loss_map_idx].mean().item() * style_weights[loss_map_idx]
 
                 for loss_name, loss_var in [("loss_val_l1", loss_total_val_l1), ("loss_val_l2", loss_total_val_l2),
-                                            ("loss_val_style", style_loss), ("loss_val_content", content_loss), ("lpips_loss", lpips_loss)]:
+                                            ("loss_val_style", style_loss * 1e3), ("loss_val_content", content_loss), ("lpips_loss", lpips_loss)]:
                     print(f'[{epoch:03d}] {loss_name}: {loss_var / len(self.valset):.5f}')
                     self.logger.log({loss_name: loss_var / len(self.valset), 'iter': epoch * len(self.trainset), 'epoch': epoch})
 

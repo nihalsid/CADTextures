@@ -46,7 +46,9 @@ def test_feature_loss(loss_type='content'):
         optimizer = torch.optim.Adam([_input_img.requires_grad_()], lr=0.01)
         return optimizer
 
-    feature_loss_helper = FeatureLossHelper(['relu4_1'], ['relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1'], 'rgb')
+    content_weights = [1 / 8, 1 / 4, 1 / 2, 1]
+    style_weights = [1 / 32, 1 / 16, 1 / 8, 1 / 4]
+    feature_loss_helper = FeatureLossHelper(['relu1_2', 'relu2_2', 'relu3_3', 'relu4_3'], ['relu1_2', 'relu2_2', 'relu3_3', 'relu4_3'], 'rgb')
     feature_loss_helper.move_to_device(torch.device('cuda:0'))
 
     def run_style_transfer(content_img, style_img, input_img, num_steps=300):
@@ -59,11 +61,21 @@ def test_feature_loss(loss_type='content'):
                 optimizer.zero_grad()
                 loss = None
                 if loss_type == 'content':
-                    loss = feature_loss_helper.calculate_feature_loss(content_img, input_img).mean()
+                    loss_maps = feature_loss_helper.calculate_feature_loss(content_img, input_img)
+                    weighted_loss_map = loss_maps[0].mean() * content_weights[0]
+                    for loss_map_idx in range(1, len(loss_maps)):
+                        weighted_loss_map += loss_maps[loss_map_idx].mean() * content_weights[loss_map_idx]
+                    loss = weighted_loss_map
                 elif loss_type == 'style':
-                    loss_content = feature_loss_helper.calculate_feature_loss(content_img, input_img).mean()
-                    loss_maps = feature_loss_helper.calculate_style_loss(style_img, input_img)
-                    loss = functools.reduce(lambda x, y: x.mean() + y.mean(), loss_maps) * 1e6 + loss_content
+                    loss_maps_c = feature_loss_helper.calculate_feature_loss(content_img, input_img)
+                    weighted_loss_map_c = loss_maps_c[0].mean() * content_weights[0]
+                    for loss_map_idx in range(1, len(loss_maps_c)):
+                        weighted_loss_map_c += loss_maps_c[loss_map_idx].mean() * content_weights[loss_map_idx]
+                    loss_maps_s = feature_loss_helper.calculate_style_loss(style_img, input_img)
+                    weighted_loss_map_s = loss_maps_s[0].mean() * style_weights[0]
+                    for loss_map_idx in range(1, len(loss_maps_s)):
+                        weighted_loss_map_s += loss_maps_s[loss_map_idx].mean() * style_weights[loss_map_idx]
+                    loss = weighted_loss_map_s * 1e7 + weighted_loss_map_c * 1e-1
                 loss.backward()
                 run[0] += 1
                 if run[0] % 50 == 0:
@@ -82,4 +94,4 @@ def test_feature_loss(loss_type='content'):
 
 
 if __name__ == "__main__":
-    test_feature_loss('content')
+    test_feature_loss('style')

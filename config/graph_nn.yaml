@@ -31,7 +31,6 @@ conv: attention
 w_l1: 1
 w_style: 0
 w_content: 0
-content_layer: 'relu4_2'
 
 hydra:
   output_subdir: null # Disable saving of config files. We'll do that ourselves.

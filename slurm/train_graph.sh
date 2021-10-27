@@ -15,4 +15,4 @@
 
 cd /rhome/ysiddiqui/CADTextures/
 
-python trainer/train_graphnet.py experiment=$experiment method=$method conv=$conv w_l1=$w_l1 w_content=$w_content w_style=$w_style wandb_main=True use_augmentations=$use_augmentations
+python trainer/train_graphnet.py dataset=$dataset experiment=$experiment method=$method conv=$conv w_l1=$w_l1 w_content=$w_content w_style=$w_style wandb_main=True use_augmentations=$use_augmentations
