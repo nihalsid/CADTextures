@@ -6,11 +6,23 @@ import hydra
 import numpy as np
 import torch
 import trimesh
+from torch.utils.data.dataloader import default_collate
 from torch_geometric.data import Data, Dataset
 from tqdm import tqdm
+from collections.abc import Mapping, Sequence
 
 from util.mesh_proc import mesh_proc
 from util.misc import read_list, DotDict
+
+
+def to_device(batch, device):
+    for k in batch.keys():
+        if isinstance(batch[k], torch.Tensor):
+            batch[k] = batch[k].to(device)
+    for k in batch['graph_data'].keys():
+        if isinstance(batch['graph_data'][k], torch.Tensor):
+            batch['graph_data'][k] = batch['graph_data'][k].to(device)
+    return batch
 
 
 class GraphMeshDataset(Dataset):
@@ -117,7 +129,12 @@ class GraphMeshDataset(Dataset):
             indexed_items = [x for x in self.items if x[0] == unique_items[idx]]
             selected_item = random.choice(indexed_items)
         data = torch.load(os.path.join(self.processed_dir, f'{self.item_to_name(selected_item)}.pt'))
-        return data
+        return {
+            "name": data.name,
+            "x": data.x,
+            "y": data.y,
+            "graph_data": self.get_item_as_graphdata(data.edge_index, data.sub_edges, data.num_sub_vertices, data.pool_maps)
+        }
 
     def read_mesh_data(self, path_all, path_input, x, y):
         nodes, input_colors, valid_colors, target_colors, edges, edge_features, vertex_features, num_sub_vertices, sub_edges, pool_maps = mesh_proc(str(path_all), str(path_input))
@@ -164,12 +181,12 @@ class GraphMeshDataset(Dataset):
         return image
 
     @staticmethod
-    def get_item_as_graphdata(sample):
+    def get_item_as_graphdata(edge_index, sub_edges, num_sub_vertices, pool_maps):
         return DotDict({
-            'edge_index': sample.edge_index,
-            'sub_edges': sample.sub_edges,
-            'node_counts': sample.num_sub_vertices,
-            'pool_maps': sample.pool_maps,
+            'edge_index': edge_index,
+            'sub_edges': sub_edges,
+            'node_counts': num_sub_vertices,
+            'pool_maps': pool_maps,
         })
 
 
@@ -269,26 +286,31 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             x_feat = torch.cat((pt_arxiv['input_positions'], pt_arxiv['input_colors'], pt_arxiv['valid_input_colors'].reshape(-1, 1)), 1).float()
         else:
             x_feat = torch.cat((pt_arxiv['input_positions'], pt_arxiv['input_colors'], pt_arxiv['valid_input_colors'].reshape(-1, 1), pt_arxiv['input_normals']), 1).float()
-        data = Data(x=x_feat,
-                    y=pt_arxiv['target_colors'].float(),
-                    edge_index=pt_arxiv['conv_data'][0][0].long(),
-                    num_sub_vertices=[pt_arxiv['conv_data'][i][0].shape[0] for i in range(1, len(pt_arxiv['conv_data']))],
-                    pad_sizes=[pt_arxiv['conv_data'][i][2].shape[0] for i in range(len(pt_arxiv['conv_data']))],
-                    sub_edges=[pt_arxiv['conv_data'][i][0].long() for i in range(1, len(pt_arxiv['conv_data']))],
-                    pool_maps=pt_arxiv['pool_locations'],
-                    is_pad=[pt_arxiv['conv_data'][i][4].bool() for i in range(len(pt_arxiv['conv_data']))],
-                    name=f"{self.item_to_name(selected_item)}")
-        return data
+
+        edge_index = pt_arxiv['conv_data'][0][0].long()
+        num_sub_vertices = [pt_arxiv['conv_data'][i][0].shape[0] for i in range(1, len(pt_arxiv['conv_data']))]
+        pad_sizes = [pt_arxiv['conv_data'][i][2].shape[0] for i in range(len(pt_arxiv['conv_data']))]
+        sub_edges = [pt_arxiv['conv_data'][i][0].long() for i in range(1, len(pt_arxiv['conv_data']))]
+        pool_maps = pt_arxiv['pool_locations']
+        is_pad = [pt_arxiv['conv_data'][i][4].bool() for i in range(len(pt_arxiv['conv_data']))]
+        level_masks = [torch.zeros(pt_arxiv['conv_data'][i][0].shape[0]).long() for i in range(len(pt_arxiv['conv_data']))]
+        return {
+            "name": f"{self.item_to_name(selected_item)}",
+            "x": x_feat,
+            "y": pt_arxiv['target_colors'].float(),
+            "graph_data": self.get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, is_pad, level_masks)
+        }
 
     @staticmethod
-    def get_item_as_graphdata(sample):
+    def get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, is_pad, level_masks):
         return DotDict({
-            'face_neighborhood': sample.edge_index,
-            'sub_neighborhoods': sample.sub_edges,
-            'pads': sample.pad_sizes,
-            'node_counts': sample.num_sub_vertices,
-            'pool_maps': sample.pool_maps,
-            'is_pad': sample.is_pad
+            'face_neighborhood': edge_index,
+            'sub_neighborhoods': sub_edges,
+            'pads': pad_sizes,
+            'node_counts': num_sub_vertices,
+            'pool_maps': pool_maps,
+            'is_pad': is_pad,
+            'level_masks': level_masks
         })
 
     def visualize_graph_with_predictions(self, item, prediction, output_dir, output_suffix):
@@ -310,6 +332,127 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             i = 127 - int(round(self.faces_to_uv[v_idx][1] * 127))
             image[:, i, j] = face_colors[v_idx, :]
         return image
+
+    @staticmethod
+    def batch_mask(t, graph_data, idx, level=0):
+        return t[graph_data['level_masks'][level] == idx]
+
+
+class GraphDataLoader(torch.utils.data.DataLoader):
+
+    def __init__(
+        self,
+        dataset: Dataset,
+        batch_size: int = 1,
+        shuffle: bool = False,
+        follow_batch=[],
+        exclude_keys=[],
+        **kwargs,
+    ):
+
+        if "collate_fn" in kwargs:
+            del kwargs["collate_fn"]
+
+        # Save for PyTorch Lightning...
+        self.follow_batch = follow_batch
+        self.exclude_keys = exclude_keys
+
+        super().__init__(dataset, batch_size, shuffle, collate_fn=Collater(follow_batch, exclude_keys), **kwargs)
+
+
+class Collater(object):
+
+    def __init__(self, follow_batch, exclude_keys):
+        self.follow_batch = follow_batch
+        self.exclude_keys = exclude_keys
+
+    @staticmethod
+    def cat_collate(batch):
+        elem = batch[0]
+        if isinstance(elem, torch.Tensor):
+            out = None
+            if torch.utils.data.get_worker_info() is not None:
+                # If we're in a background process, concatenate directly into a
+                # shared memory tensor to avoid an extra copy
+                numel = sum([x.numel() for x in batch])
+                storage = elem.storage()._new_shared(numel)
+                out = elem.new(storage)
+            return torch.cat(batch, 0, out=out)
+        raise NotImplementedError
+
+    def collate(self, batch):
+        elem = batch[0]
+        if isinstance(elem, torch.Tensor):
+            return default_collate(batch)
+        elif isinstance(elem, float):
+            return torch.tensor(batch, dtype=torch.float)
+        elif isinstance(elem, int):
+            return torch.tensor(batch)
+        elif isinstance(elem, str):
+            return batch
+        elif isinstance(elem, DotDict):
+            if 'face_neighborhood' in elem:  # face conv data
+                face_neighborhood, sub_neighborhoods, pads, node_counts, pool_maps, is_pad, level_masks = [], [], [], [], [], [], []
+                pad_sum = 0
+
+                for b_i in range(len(batch)):
+                    face_neighborhood.append(batch[b_i].face_neighborhood + pad_sum)
+                    pad_sum += batch[b_i].is_pad[0].shape[0]
+
+                for sub_i in range(len(elem.pads)):
+                    is_pad_n = []
+                    pad_n = 0
+                    for b_i in range(len(batch)):
+                        is_pad_n.append(batch[b_i].is_pad[sub_i])
+                        batch[b_i].level_masks[sub_i][:] = b_i
+                        pad_n += batch[b_i].pads[sub_i]
+                    is_pad.append(self.cat_collate(is_pad_n))
+                    level_masks.append(self.cat_collate([batch[b_i].level_masks[sub_i] for b_i in range(len(batch))]))
+                    pads.append(pad_n)
+
+                for sub_i in range(len(elem.sub_neighborhoods)):
+                    sub_n = []
+                    pool_n = []
+                    node_count_n = 0
+                    pad_sum = 0
+                    for b_i in range(len(batch)):
+                        sub_n.append(batch[b_i].sub_neighborhoods[sub_i] + pad_sum)
+                        pool_n.append(batch[b_i].pool_maps[sub_i] + node_count_n)
+                        pad_sum += batch[b_i].is_pad[sub_i + 1].shape[0]
+                        node_count_n += batch[b_i].node_counts[sub_i]
+                    sub_neighborhoods.append(self.cat_collate(sub_n))
+                    node_counts.append(node_count_n)
+                    pool_maps.append(self.cat_collate(pool_n))
+
+                batch_dot_dict = {
+                    'face_neighborhood': self.cat_collate(face_neighborhood),
+                    'sub_neighborhoods': sub_neighborhoods,
+                    'pads': pads,
+                    'node_counts': node_counts,
+                    'pool_maps': pool_maps,
+                    'is_pad': is_pad,
+                    'level_masks': level_masks
+                }
+
+                return batch_dot_dict
+            else:  # graph conv data
+                raise NotImplementedError
+        elif isinstance(elem, Mapping):
+            retdict = {}
+            for key in elem:
+                if key in ['x', 'y']:
+                    retdict[key] = self.cat_collate([d[key] for d in batch])
+                else:
+                    retdict[key] = self.collate([d[key] for d in batch])
+            return retdict
+        elif isinstance(elem, tuple) and hasattr(elem, '_fields'):
+            return type(elem)(*(self.collate(s) for s in zip(*batch)))
+        elif isinstance(elem, Sequence) and not isinstance(elem, str):
+            return [self.collate(s) for s in zip(*batch)]
+        raise TypeError('DataLoader found invalid type: {}'.format(type(elem)))
+
+    def __call__(self, batch):
+        return self.collate(batch)
 
 
 @hydra.main(config_path='../config', config_name='graph_nn')

@@ -11,7 +11,7 @@ from PIL import Image
 from pytorch_lightning import seed_everything
 from tqdm import tqdm
 
-from dataset.graph_mesh_dataset import GraphMeshDataset, FaceGraphMeshDataset
+from dataset.graph_mesh_dataset import GraphMeshDataset, FaceGraphMeshDataset, to_device
 from model.augmentation import rgb_shift, channel_dropout, channel_shuffle, random_gamma, random_brightness_contrast
 from model.graphnet import BigGraphSAGEEncoderDecoder, BigFaceEncoderDecoder, FaceConv, SymmetricFaceConv, SpatialAttentionConv, WrappedLinear
 from util.feature_loss import FeatureLossHelper
@@ -101,26 +101,26 @@ class GraphNetTrainer:
             for iter_idx, i in pbar:
                 sample = self.trainset[i]
                 # move batch to device
-                sample = sample.to(self.device)
+                sample = to_device(sample, self.device)
                 # zero out previously accumulated gradients
                 optimizer.zero_grad()
                 if self.config.use_augmentations:
                     if random.random() < 0.5:
                         choosen_augmentation = random.choice([rgb_shift, channel_dropout, channel_shuffle, random_gamma, random_brightness_contrast])
-                        sample.x[:, 3:6], sample.y = choosen_augmentation(sample.x[:, 3:6], sample.y)
+                        sample["x"][:, 3:6], sample["y"] = choosen_augmentation(sample["x"][:, 3:6], sample["y"])
                         if random.random() < 0.1:
                             choosen_augmentation = random.choice([rgb_shift, channel_dropout, channel_shuffle, random_gamma, random_brightness_contrast])
-                            sample.x[:, 3:6], sample.y = choosen_augmentation(sample.x[:, 3:6], sample.y)
+                            sample["x"][:, 3:6], sample["y"] = choosen_augmentation(sample["x"][:, 3:6], sample["y"])
 
                 # forward pass
-                prediction = self.model(sample.x, self.trainset.get_item_as_graphdata(sample))
+                prediction = self.model(sample["x"], sample["graph_data"])
 
                 # compute loss
-                mask = self.trainset.mask(sample.y)
-                loss_l1 = (l1_criterion.calculate_loss(prediction[:sample.y.shape[0], :], sample.y).mean(dim=1) * mask).mean()
+                mask = self.trainset.mask(sample["y"])
+                loss_l1 = (l1_criterion.calculate_loss(prediction[:sample["y"].shape[0], :], sample["y"]).mean(dim=1) * mask).mean()
 
                 prediction_as_image = self.trainset.to_image((prediction * mask.unsqueeze(-1))).unsqueeze(0)
-                target_as_image = self.trainset.to_image((sample.y * mask.unsqueeze(-1))).unsqueeze(0)
+                target_as_image = self.trainset.to_image((sample["y"] * mask.unsqueeze(-1))).unsqueeze(0)
 
                 loss_maps_content = feature_loss_helper.calculate_feature_loss(target_as_image, prediction_as_image)
                 loss_content = loss_maps_content[0].mean() * content_weights[0]
@@ -170,17 +170,17 @@ class GraphNetTrainer:
                 # forward pass and evaluation for entire validation set
                 for sample_val in self.valset:
 
-                    sample_val = sample_val.to(self.device)
+                    sample_val = to_device(sample_val, self.device)
 
                     with torch.no_grad():
-                        prediction = self.model(sample_val.x, self.valset.get_item_as_graphdata(sample_val))
-                        prediction = prediction[:sample_val.y.shape[0], :]
+                        prediction = self.model(sample_val["x"], sample_val["graph_data"])
+                        prediction = prediction[:sample_val["y"].shape[0], :]
 
-                    mask = self.valset.mask(sample_val.y)
-                    loss_total_val_l1 += (l1_criterion.calculate_loss(prediction, sample_val.y).mean(dim=1) * mask).mean().item()
-                    loss_total_val_l2 += (l2_criterion.calculate_loss(prediction, sample_val.y).mean(dim=1) * mask).mean().item()
+                    mask = self.valset.mask(sample_val["y"])
+                    loss_total_val_l1 += (l1_criterion.calculate_loss(prediction, sample_val["y"]).mean(dim=1) * mask).mean().item()
+                    loss_total_val_l2 += (l2_criterion.calculate_loss(prediction, sample_val["y"]).mean(dim=1) * mask).mean().item()
                     prediction_as_image = self.valset.to_image((prediction * mask.unsqueeze(-1))).unsqueeze(0)
-                    target_as_image = self.valset.to_image((sample_val.y * mask.unsqueeze(-1))).unsqueeze(0)
+                    target_as_image = self.valset.to_image((sample_val["y"] * mask.unsqueeze(-1))).unsqueeze(0)
 
                     # nihalsid: test image readoff from plane
                     # Path(f"runs/{config.experiment}/visualization/epoch_{epoch:05d}/").mkdir(exist_ok=True, parents=True)
@@ -209,16 +209,16 @@ class GraphNetTrainer:
                     torch.save(self.model.state_dict(), f'runs/{self.config.experiment}/model_{epoch}.ckpt')
 
                 for sample_val in self.valvisset:
-                    sample_val = sample_val.to(self.device)
+                    sample_val = to_device(sample_val, self.device)
 
                     with torch.no_grad():
-                        prediction = self.model(sample_val.x, self.valset.get_item_as_graphdata(sample_val))
-                        prediction = prediction[:sample_val.y.shape[0], :]
+                        prediction = self.model(sample_val["x"], sample_val["graph_data"])
+                        prediction = prediction[:sample_val["y"].shape[0], :]
 
-                    mask = self.valset.mask(sample_val.y).unsqueeze(-1)
-                    self.valvisset.visualize_graph_with_predictions(sample_val, (sample_val.y * mask).cpu().numpy(), f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}', 'gt')
+                    mask = self.valset.mask(sample_val["y"]).unsqueeze(-1)
+                    self.valvisset.visualize_graph_with_predictions(sample_val, (sample_val["y"] * mask).cpu().numpy(), f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}', 'gt')
                     self.valvisset.visualize_graph_with_predictions(sample_val, (prediction * mask).cpu().numpy(), f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}', 'pred')
-                    self.valvisset.visualize_graph_with_predictions(sample_val, (sample_val.x[:, 3:6] * mask).cpu().numpy(), f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}', 'in')
+                    self.valvisset.visualize_graph_with_predictions(sample_val, (sample_val["x"][:, 3:6] * mask).cpu().numpy(), f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}', 'in')
 
                 # set model back to train
                 self.model.train()
@@ -235,14 +235,14 @@ class GraphNetTrainer:
             sample_val = sample_val.to(self.device)
             with torch.no_grad():
                 if self.config.method == 'graph':
-                    prediction = self.model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.sub_edges)
+                    prediction = self.model(sample_val["x"], sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.sub_edges)
                 else:
-                    prediction = self.model(sample_val.x, sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.pad_sizes, sample_val.sub_edges)
-                prediction = prediction[:sample_val.y.shape[0], :]
+                    prediction = self.model(sample_val["x"], sample_val.edge_index, sample_val.num_sub_vertices, sample_val.pool_maps, sample_val.pad_sizes, sample_val.sub_edges)
+                prediction = prediction[:sample_val["y"].shape[0], :]
 
-            mask = self.valset.mask(sample_val.y)
+            mask = self.valset.mask(sample_val["y"])
             prediction_as_image = self.valset.to_image((prediction * mask.unsqueeze(-1))).unsqueeze(0)
-            target_as_image = self.valset.to_image((sample_val.y * mask.unsqueeze(-1))).unsqueeze(0)
+            target_as_image = self.valset.to_image((sample_val["y"] * mask.unsqueeze(-1))).unsqueeze(0)
 
             Image.fromarray(((prediction_as_image.squeeze(0).permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'{vis_dir}/pred_{sample_val.name}.png')
             Image.fromarray(((target_as_image.squeeze(0).permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'{vis_dir}/tgt_{sample_val.name}.png')
