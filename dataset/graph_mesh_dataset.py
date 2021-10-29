@@ -22,6 +22,10 @@ def to_device(batch, device):
     for k in batch['graph_data'].keys():
         if isinstance(batch['graph_data'][k], torch.Tensor):
             batch['graph_data'][k] = batch['graph_data'][k].to(device)
+        elif isinstance(batch['graph_data'][k], list):
+            for m in range(len(batch['graph_data'][k])):
+                if isinstance(batch['graph_data'][k][m], torch.Tensor):
+                    batch['graph_data'][k][m] = batch['graph_data'][k][m].to(device)
     return batch
 
 
@@ -40,7 +44,7 @@ class GraphMeshDataset(Dataset):
                 self.items = [(item, x, y) for item in item_list for x in range(225, 60, -45) for y in range(0, 360, 45)]
             self.target_name = "model_normalized.obj"
             self.input_name = lambda x, y: f"model_normalized_input_{x:03d}_{y:03d}.obj"
-            self.mask = lambda x: torch.ones((x.shape[0],)).float().to(x.device)
+            self.mask = lambda x, bs: torch.ones((x.shape[0],)).float().to(x.device)
             split_name = config.dataset.name.split('/')
             mesh = trimesh.load(Path(config.dataset.data_dir, split_name[0] + '-model', split_name[1]) / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
             self.vertex_to_uv = np.array(mesh.visual.uv)
@@ -55,7 +59,7 @@ class GraphMeshDataset(Dataset):
             mesh = trimesh.load(Path(config.dataset.data_dir, config.dataset.name) / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
             self.target_valid_area = mesh.visual.vertex_colors[:, 3] == 255
             self.sort_indices = np.lexsort((mesh.vertices[:, 0], mesh.vertices[:, 1], mesh.vertices[:, 2]))
-            self.mask = lambda x: torch.from_numpy(self.target_valid_area).float().to(x.device)
+            self.mask = lambda x, bs: torch.from_numpy(self.target_valid_area).repeat(bs).float().to(x.device)
             self.to_image = self.plane_to_image
         self.items = [x for i, x in enumerate(self.items) if i % config.n_proc == config.proc]
         super().__init__(Path(config.dataset.data_dir, config.dataset.name))
@@ -155,12 +159,12 @@ class GraphMeshDataset(Dataset):
                          name=f"{path_all.parent.name}_{x:03d}_{y:03d}")
         return mesh_data
 
-    def visualize_graph_with_predictions(self, item, prediction, output_dir, output_suffix):
+    def visualize_graph_with_predictions(self, name, prediction, output_dir, output_suffix):
         output_dir = Path(output_dir)
         output_dir.mkdir(exist_ok=True, parents=True)
-        mesh = trimesh.load(Path(self.raw_dir, "_".join(item.name.split('_')[:-2])) / self.target_name, force='mesh', process=False)
+        mesh = trimesh.load(Path(self.raw_dir, "_".join(name.split('_')[:-2])) / self.target_name, force='mesh', process=False)
         mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, vertex_colors=prediction + 0.5, process=False)
-        mesh.export(output_dir / f"{item.name}_{output_suffix}.obj")
+        mesh.export(output_dir / f"{name}_{output_suffix}.obj")
 
     def plane_to_image(self, vertex_colors):
         sort_index_i = 0
@@ -206,7 +210,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
                 self.items = [(item, x, y) for item in item_list for x in range(225, 60, -45) for y in range(0, 360, 45)]
             self.target_name = "model_normalized.obj"
             self.input_name = lambda x, y: f"model_normalized_input_{x:03d}_{y:03d}.obj"
-            self.mask = lambda x: torch.ones((x.shape[0],)).float().to(x.device)
+            self.mask = lambda x, bs: torch.ones((x.shape[0],)).float().to(x.device)
             split_name = config.dataset.name.split('/')
             mesh = trimesh.load(Path(config.dataset.data_dir, split_name[0] + '-model', split_name[1]) / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
             vertex_to_uv = np.array(mesh.visual.uv)
@@ -216,7 +220,15 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             c = vertex_to_uv[faces_to_vertices[:, 2], :]
             d = vertex_to_uv[faces_to_vertices[:, 3], :]
             self.faces_to_uv = (a + b + c + d) / 4
-            self.to_image = self.mesh_to_image
+            self.indices_dest_i = []
+            self.indices_dest_j = []
+            self.indices_src = []
+            for v_idx in range(self.faces_to_uv.shape[0]):
+                j = int(round(self.faces_to_uv[v_idx][0] * 127))
+                i = 127 - int(round(self.faces_to_uv[v_idx][1] * 127))
+                self.indices_dest_i.append(i)
+                self.indices_dest_j.append(j)
+                self.indices_src.append(v_idx)
         else:
             if use_single_view:
                 self.items = [(item, 0, 0) for item in item_list]
@@ -228,8 +240,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             self.target_valid_area = mesh.visual.face_colors[:, 3] == 255
             mesh_triangle_center = mesh.triangles.mean(axis=1)
             sort_indices = np.lexsort((mesh_triangle_center[:, 0], mesh_triangle_center[:, 1], mesh_triangle_center[:, 2]))
-            self.mask = lambda x: torch.from_numpy(self.target_valid_area).float().to(x.device)
-            self.to_image = self.plane_to_image
+            self.mask = lambda x, bs: torch.from_numpy(self.target_valid_area).repeat(bs).float().to(x.device)
             sort_index_i = 0
             self.indices_dest_i = []
             self.indices_dest_j = []
@@ -313,24 +324,20 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
             'level_masks': level_masks
         })
 
-    def visualize_graph_with_predictions(self, item, prediction, output_dir, output_suffix):
+    def visualize_graph_with_predictions(self, name, prediction, output_dir, output_suffix):
         output_dir = Path(output_dir)
         output_dir.mkdir(exist_ok=True, parents=True)
-        mesh = trimesh.load(Path(self.raw_dir, "_".join(item.name.split('_')[:-2])) / self.target_name, force='mesh', process=False)
+        mesh = trimesh.load(Path(self.raw_dir, "_".join(name.split('_')[:-2])) / self.target_name, force='mesh', process=False)
         mesh = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, face_colors=prediction + 0.5, process=False)
-        mesh.export(output_dir / f"{item.name}_{output_suffix}.obj")
+        mesh.export(output_dir / f"{name}_{output_suffix}.obj")
 
-    def plane_to_image(self, face_colors):
-        image = torch.zeros((3, 128, 128)).float().to(face_colors.device)
-        image[:, self.indices_dest_i, self.indices_dest_j] = face_colors[self.indices_src, :3].T
-        return image
-
-    def mesh_to_image(self, face_colors):
-        image = torch.zeros((3, 128, 128)).float().to(face_colors.device)
-        for v_idx in range(face_colors.shape[0]):
-            j = int(round(self.faces_to_uv[v_idx][0] * 127))
-            i = 127 - int(round(self.faces_to_uv[v_idx][1] * 127))
-            image[:, i, j] = face_colors[v_idx, :]
+    def to_image(self, face_colors, level_mask):
+        batch_size = level_mask.max() + 1
+        image = torch.zeros((batch_size, 3, 128, 128), device=face_colors.device)
+        indices_dest_i = torch.tensor(self.indices_dest_i * batch_size, device=face_colors.device).long()
+        indices_dest_j = torch.tensor(self.indices_dest_j * batch_size, device=face_colors.device).long()
+        indices_src = torch.tensor(self.indices_src * batch_size, device=face_colors.device).long()
+        image[level_mask, :, indices_dest_i, indices_dest_j] = face_colors[indices_src + level_mask * len(self.indices_src), :]
         return image
 
     @staticmethod
@@ -341,15 +348,14 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
 class GraphDataLoader(torch.utils.data.DataLoader):
 
     def __init__(
-        self,
-        dataset: Dataset,
-        batch_size: int = 1,
-        shuffle: bool = False,
-        follow_batch=[],
-        exclude_keys=[],
-        **kwargs,
+            self,
+            dataset: Dataset,
+            batch_size: int = 1,
+            shuffle: bool = False,
+            follow_batch=[],
+            exclude_keys=[],
+            **kwargs,
     ):
-
         if "collate_fn" in kwargs:
             del kwargs["collate_fn"]
 

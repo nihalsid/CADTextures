@@ -11,7 +11,7 @@ from PIL import Image
 from pytorch_lightning import seed_everything
 from tqdm import tqdm
 
-from dataset.graph_mesh_dataset import GraphMeshDataset, FaceGraphMeshDataset, to_device
+from dataset.graph_mesh_dataset import GraphMeshDataset, FaceGraphMeshDataset, to_device, GraphDataLoader
 from model.augmentation import rgb_shift, channel_dropout, channel_shuffle, random_gamma, random_brightness_contrast
 from model.graphnet import BigGraphSAGEEncoderDecoder, BigFaceEncoderDecoder, FaceConv, SymmetricFaceConv, SpatialAttentionConv, WrappedLinear
 from util.feature_loss import FeatureLossHelper
@@ -92,18 +92,19 @@ class GraphNetTrainer:
         # keep track of running average of train loss for printing
         train_loss_running = 0.
         train_loss_running_total = 0.
+        train_dataloader = GraphDataLoader(self.trainset, self.config.batch_size, shuffle=True, pin_memory=True, num_workers=self.config.num_workers)
+        val_dataloader = GraphDataLoader(self.valset, self.config.batch_size, shuffle=False, num_workers=0)
+        vis_dataloader = GraphDataLoader(self.valvisset, self.config.batch_size, shuffle=False, num_workers=0)
 
         for epoch in range(self.config.max_epoch):
-
-            shuffled_indices = list(range(len(self.trainset)))
-            random.shuffle(shuffled_indices)
-            pbar = tqdm(list(enumerate(shuffled_indices)), desc=f'Epoch {epoch:03d}')
-            for iter_idx, i in pbar:
-                sample = self.trainset[i]
+            pbar = tqdm(list(enumerate(train_dataloader)), desc=f'Epoch {epoch:03d}')
+            for batch_idx, batch in pbar:
+                sample = batch
                 # move batch to device
                 sample = to_device(sample, self.device)
                 # zero out previously accumulated gradients
-                optimizer.zero_grad()
+                optimizer.zero_grad(set_to_none=True)
+
                 if self.config.use_augmentations:
                     if random.random() < 0.5:
                         choosen_augmentation = random.choice([rgb_shift, channel_dropout, channel_shuffle, random_gamma, random_brightness_contrast])
@@ -116,11 +117,11 @@ class GraphNetTrainer:
                 prediction = self.model(sample["x"], sample["graph_data"])
 
                 # compute loss
-                mask = self.trainset.mask(sample["y"])
+                mask = self.trainset.mask(sample["y"], self.config.batch_size)
                 loss_l1 = (l1_criterion.calculate_loss(prediction[:sample["y"].shape[0], :], sample["y"]).mean(dim=1) * mask).mean()
 
-                prediction_as_image = self.trainset.to_image((prediction * mask.unsqueeze(-1))).unsqueeze(0)
-                target_as_image = self.trainset.to_image((sample["y"] * mask.unsqueeze(-1))).unsqueeze(0)
+                prediction_as_image = self.trainset.to_image((prediction * mask.unsqueeze(-1)), sample["graph_data"]["level_masks"][0])
+                target_as_image = self.trainset.to_image((sample["y"] * mask.unsqueeze(-1)), sample["graph_data"]["level_masks"][0])
 
                 loss_maps_content = feature_loss_helper.calculate_feature_loss(target_as_image, prediction_as_image)
                 loss_content = loss_maps_content[0].mean() * content_weights[0]
@@ -144,7 +145,7 @@ class GraphNetTrainer:
                 train_loss_running += loss_l1.item()
                 train_loss_running_total += loss_total.item()
 
-                iteration = epoch * len(self.trainset) + iter_idx
+                iteration = epoch * len(train_dataloader) + batch_idx
 
                 if iteration % self.config.print_interval == (self.config.print_interval - 1):
                     last_train_loss = train_loss_running / self.config.print_interval
@@ -168,7 +169,7 @@ class GraphNetTrainer:
                 lpips_loss = 0
 
                 # forward pass and evaluation for entire validation set
-                for sample_val in self.valset:
+                for sample_val in val_dataloader:
 
                     sample_val = to_device(sample_val, self.device)
 
@@ -176,19 +177,14 @@ class GraphNetTrainer:
                         prediction = self.model(sample_val["x"], sample_val["graph_data"])
                         prediction = prediction[:sample_val["y"].shape[0], :]
 
-                    mask = self.valset.mask(sample_val["y"])
+                    mask = self.valset.mask(sample_val["y"], self.config.batch_size)
                     loss_total_val_l1 += (l1_criterion.calculate_loss(prediction, sample_val["y"]).mean(dim=1) * mask).mean().item()
                     loss_total_val_l2 += (l2_criterion.calculate_loss(prediction, sample_val["y"]).mean(dim=1) * mask).mean().item()
-                    prediction_as_image = self.valset.to_image((prediction * mask.unsqueeze(-1))).unsqueeze(0)
-                    target_as_image = self.valset.to_image((sample_val["y"] * mask.unsqueeze(-1))).unsqueeze(0)
-
-                    # nihalsid: test image readoff from plane
-                    # Path(f"runs/{config.experiment}/visualization/epoch_{epoch:05d}/").mkdir(exist_ok=True, parents=True)
-                    # Image.fromarray(((prediction_as_image.squeeze(0).permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'runs/{config.experiment}/visualization/epoch_{epoch:05d}/pred_{sample_val.name}.png')
-                    # Image.fromarray(((target_as_image.squeeze(0).permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'runs/{config.experiment}/visualization/epoch_{epoch:05d}/tgt_{sample_val.name}.png')
+                    prediction_as_image = self.valset.to_image((prediction * mask.unsqueeze(-1)), sample_val["graph_data"]["level_masks"][0])
+                    target_as_image = self.valset.to_image((sample_val["y"] * mask.unsqueeze(-1)), sample_val["graph_data"]["level_masks"][0])
 
                     with torch.no_grad():
-                        lpips_loss += loss_fn_alex(target_as_image * 2, prediction_as_image * 2).cpu().item()
+                        lpips_loss += loss_fn_alex(target_as_image * 2, prediction_as_image * 2).mean().cpu().item()
 
                         loss_maps_content = feature_loss_helper.calculate_feature_loss(target_as_image, prediction_as_image)
                         content_loss = loss_maps_content[0].mean().item() * content_weights[0]
@@ -202,23 +198,33 @@ class GraphNetTrainer:
 
                 for loss_name, loss_var in [("loss_val_l1", loss_total_val_l1), ("loss_val_l2", loss_total_val_l2),
                                             ("loss_val_style", style_loss * 1e3), ("loss_val_content", content_loss), ("lpips_loss", lpips_loss)]:
-                    print(f'[{epoch:03d}] {loss_name}: {loss_var / len(self.valset):.5f}')
-                    self.logger.log({loss_name: loss_var / len(self.valset), 'iter': epoch * len(self.trainset), 'epoch': epoch})
+                    print(f'[{epoch:03d}] {loss_name}: {loss_var / len(val_dataloader):.5f}')
+                    self.logger.log({loss_name: loss_var / len(val_dataloader), 'iter': epoch * len(train_dataloader), 'epoch': epoch})
 
                 if epoch % self.config.save_epoch == (self.config.save_epoch - 1):
                     torch.save(self.model.state_dict(), f'runs/{self.config.experiment}/model_{epoch}.ckpt')
 
-                for sample_val in self.valvisset:
+                for sample_val in vis_dataloader:
                     sample_val = to_device(sample_val, self.device)
 
                     with torch.no_grad():
                         prediction = self.model(sample_val["x"], sample_val["graph_data"])
                         prediction = prediction[:sample_val["y"].shape[0], :]
 
-                    mask = self.valset.mask(sample_val["y"]).unsqueeze(-1)
-                    self.valvisset.visualize_graph_with_predictions(sample_val, (sample_val["y"] * mask).cpu().numpy(), f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}', 'gt')
-                    self.valvisset.visualize_graph_with_predictions(sample_val, (prediction * mask).cpu().numpy(), f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}', 'pred')
-                    self.valvisset.visualize_graph_with_predictions(sample_val, (sample_val["x"][:, 3:6] * mask).cpu().numpy(), f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}', 'in')
+                    mask = self.valset.mask(sample_val["y"], self.config.batch_size).unsqueeze(-1)
+                    prediction_as_image = self.valset.to_image((prediction * mask), sample_val["graph_data"]["level_masks"][0])
+                    target_as_image = self.valset.to_image((sample_val["y"] * mask), sample_val["graph_data"]["level_masks"][0])
+
+                    Path(f"runs/{self.config.experiment}/visualization/epoch_{epoch:05d}/").mkdir(exist_ok=True, parents=True)
+                    for bi in range(sample_val["graph_data"]["level_masks"][0].max() + 1):
+                        Image.fromarray(((prediction_as_image[bi].permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}/pred_{sample_val["name"][bi]}.png')
+                        Image.fromarray(((target_as_image[bi].permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}/tgt_{sample_val["name"][bi]}.png')
+                        yi_masked = self.valset.batch_mask((sample_val["y"] * mask), sample_val['graph_data'], bi)
+                        pred_masked = self.valset.batch_mask((prediction * mask), sample_val['graph_data'], bi)
+                        input_masked = self.valset.batch_mask((sample_val["x"][:, 3:6] * mask), sample_val['graph_data'], bi)
+                        self.valvisset.visualize_graph_with_predictions(sample_val['name'][bi], yi_masked.cpu().numpy(), f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}', 'gt')
+                        self.valvisset.visualize_graph_with_predictions(sample_val['name'][bi], pred_masked.cpu().numpy(), f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}', 'pred')
+                        self.valvisset.visualize_graph_with_predictions(sample_val['name'][bi], input_masked.cpu().numpy(), f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}', 'in')
 
                 # set model back to train
                 self.model.train()

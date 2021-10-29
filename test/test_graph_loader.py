@@ -11,13 +11,13 @@ from model.graphnet import pool, unpool, SpatialAttentionConv, BigFaceEncoderDec
 
 
 @hydra.main(config_path='../config', config_name='graph_nn_test')
-def test_loader(config, test_models=True, test_reconstruction=False, test_decimation=False, visualize_images=False):
+def test_loader(config, test_models=False, test_reconstruction=False, test_decimation=False, visualize_images=True):
     batch_size = 4
     conv = SpatialAttentionConv(in_channels=10, out_channels=3)
     model = BigFaceEncoderDecoder(10, 3, 128, SpatialAttentionConv, num_pools=config.dataset.num_pools, input_transform=WrappedLinear)
     dataset = FaceGraphMeshDataset(config, 'val_vis', use_single_view=True, load_to_memory=False)
     dataloader = GraphDataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
-    mesh_decimations = ["model_normalized"] + [f"decimate_{i}" for i in range(1, config.dataset.num_pools + 1)]
+    mesh_decimations = ["surface_texture"] + [f"decimate_{i}" for i in range(1, config.dataset.num_pools + 1)]
     meshes = [trimesh.load(f"data/{config.dataset.name}/coloredbrodatz_D48_COLORED/{x}.obj", process=False) for x in mesh_decimations]
     for idx, batch in enumerate(dataloader):
         # Test data member sizes
@@ -27,7 +27,7 @@ def test_loader(config, test_models=True, test_reconstruction=False, test_decima
             print(f'\t{key}: {len(batch["graph_data"][key])}')
         # Test conv & model
         if test_models:
-            # print(conv(batch['x'], batch['graph_data']['face_neighborhood'], batch['graph_data']['is_pad'][0], batch['graph_data']['pads'][0]).shape)
+            print(conv(batch['x'], batch['graph_data']['face_neighborhood'], batch['graph_data']['is_pad'][0], batch['graph_data']['pads'][0]).shape)
             print(model(batch['x'], batch['graph_data']).shape)
         # Test pool(3) + unpool(3)
         if test_reconstruction:
@@ -51,14 +51,12 @@ def test_loader(config, test_models=True, test_reconstruction=False, test_decima
                 face_colors_0 = face_colors_1.copy()
         # Test x, y visualizations
         if visualize_images:
+            mask = dataset.mask(batch['y'], batch_size)
+            target_as_image = dataset.to_image((batch['y'] * mask.unsqueeze(-1)), batch['graph_data']['level_masks'][0])
+            input_as_image = dataset.to_image((batch['x'][:, 3:6] * mask.unsqueeze(-1)), batch['graph_data']['level_masks'][0])
             for i in range(batch_size):
-                batch_yi_masked = dataset.batch_mask(batch['y'], batch['graph_data'], i)
-                batch_xi_masked = dataset.batch_mask(batch['x'], batch['graph_data'], i)
-                mask = dataset.mask(batch_yi_masked)
-                target_as_image = dataset.to_image((batch_yi_masked * mask.unsqueeze(-1))).unsqueeze(0)
-                input_as_image = dataset.to_image((batch_xi_masked[:, 3:6] * mask.unsqueeze(-1))).unsqueeze(0)
-                Image.fromarray(((input_as_image.squeeze(0).permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'input_{i}.png')
-                Image.fromarray(((target_as_image.squeeze(0).permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'target_{i}.png')
+                Image.fromarray(((input_as_image[i].permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'input_{i}.png')
+                Image.fromarray(((target_as_image[i].permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'target_{i}.png')
 
 
 @hydra.main(config_path='../config', config_name='graph_nn_test')

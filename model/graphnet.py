@@ -177,6 +177,7 @@ class GraphSAGEEncoderDecoder(nn.Module):
         return self.tanh(x_out) * 0.5
 
 
+@torch.jit.script
 def swish(x):
     # swish
     return x * torch.sigmoid(x)
@@ -586,19 +587,36 @@ class SpatialAttentionConv(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.num_heads = max(1, in_channels // 32)
-        print(self.num_heads)
         self.attention = nn.MultiheadAttention(in_channels, self.num_heads, batch_first=True)
         self.conv = nn.Conv2d(in_channels, out_channels, (1, 2))
 
     def forward(self, x, face_neighborhood, face_is_pad, pad_size):
         padded_x = torch.zeros((pad_size, x.shape[1]), dtype=x.dtype, device=x.device)
         padded_x[torch.logical_not(face_is_pad), :] = x
-        f_ = [self.index(padded_x, face_neighborhood[:, i]) for i in range(9)]
-        is_pad = torch.repeat_interleave(face_is_pad[face_neighborhood[:, 1:]].unsqueeze(1), self.num_heads, dim=0)
-        key_val = torch.cat([f.unsqueeze(1) for f in f_[1:]], dim=1)
-        h, _ = self.attention(f_[0].unsqueeze(1), key_val, key_val, attn_mask=is_pad)
-        conv_input = torch.cat([f_[0].unsqueeze(-1).unsqueeze(-1), h.squeeze(1).unsqueeze(-1).unsqueeze(-1)], dim=3)
+        is_pad = face_is_pad[face_neighborhood[:, 1:]].unsqueeze(1).expand(-1, self.num_heads, -1).reshape(-1, 8).unsqueeze(1)
+        f_ = torch.stack([self.index(padded_x, face_neighborhood[:, i]) for i in range(9)], dim=1)
+        h = self.attention(f_[:, 0:1, :], f_[:, 1:, :], f_[:, 1:, :], attn_mask=is_pad, need_weights=False)[0]
+        conv_input = torch.cat([f_[:, 0, :].unsqueeze(-1).unsqueeze(-1), h.squeeze(1).unsqueeze(-1).unsqueeze(-1)], dim=3)
         return self.conv(conv_input).squeeze(-1).squeeze(-1)
+
+
+class Blur(nn.Module):
+
+    def __init__(self, in_channels):
+        super().__init__()
+        self.in_channels = in_channels
+        self.register_buffer("weight", torch.ones((in_channels, 1, 1, 9)).float())
+        self.register_buffer("blur_filter", torch.tensor([1/4, 1/8, 1/16, 1/8, 1/16, 1/8, 1/16, 1/8, 1/16]).float())
+        self.weight[:, :, 0, :] = self.blur_filter
+
+    def forward(self, x, face_neighborhood, face_is_pad, pad_size):
+        padded_x = torch.zeros((pad_size, x.shape[1]), dtype=x.dtype, device=x.device)
+        padded_x[torch.logical_not(face_is_pad), :] = x
+        f_ = [padded_x[face_neighborhood[:, i]] for i in range(9)]
+        conv_input = torch.cat([f.unsqueeze(-1).unsqueeze(-1) for f in f_], dim=3)
+        correction_factor = ((1 - face_is_pad[face_neighborhood].float()) * self.blur_filter.unsqueeze(0).expand(face_neighborhood.shape[0], -1)).sum(-1)
+        correction_factor = correction_factor.unsqueeze(1).expand(-1, x.shape[1])
+        return nn.functional.conv2d(conv_input, self.weight, groups=self.in_channels).squeeze(-1).squeeze(-1) / correction_factor
 
 
 class WrappedLinear(nn.Module):
@@ -686,8 +704,8 @@ class BigFaceEncoderDecoder(nn.Module):
         if input_transform is None:
             input_transform = conv_layer
         self.num_pools = num_pools
-        norm = GraphNorm
-        self.activation = nn.LeakyReLU(0.02)
+        norm = BatchNorm
+        self.activation = nn.LeakyReLU()
         self.enc_conv_in = input_transform(in_channels, nf)
         self.down_0_block_0 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
         self.down_0_block_1 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
@@ -722,59 +740,66 @@ class BigFaceEncoderDecoder(nn.Module):
         self.up_0_block_0 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
         self.up_0_block_1 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
         self.up_0_block_2 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
+        self.blur_0 = Blur(nf)
 
         self.up_1_block_0 = FResNetBlock(nf * 2, nf, conv_layer, norm, self.activation)
         self.up_1_block_1 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
         self.up_1_block_2 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
+        self.blur_1 = Blur(nf)
 
         self.up_2_block_0 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
         self.up_2_block_1 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
         self.up_2_block_2 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
+        self.blur_2 = Blur(nf * 2)
 
         self.up_3_block_0 = FResNetBlock(nf * 4, nf * 2, conv_layer, norm, self.activation)
         self.up_3_block_1 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
         self.up_3_block_2 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
+        self.blur_3 = Blur(nf * 2)
 
         self.up_4_block_0 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
         self.up_4_block_1 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
         self.up_4_block_2 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
+        self.blur_4 = Blur(nf * 4)
         # self.up_4_attn_block_0 = GAttnBlock(nf * 4, conv_layer, norm)
         # self.up_4_attn_block_1 = GAttnBlock(nf * 4, conv_layer, norm)
         # self.up_4_attn_block_2 = GAttnBlock(nf * 4, conv_layer, norm)
 
+        self.dec_out_block = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
         self.dec_out_norm = norm(nf)
-        self.dec_out_conv = conv_layer(nf, out_channels)
+        self.dec_out_linear = nn.Linear(nf, out_channels)
+
         self.tanh = nn.Tanh()
 
     def forward(self, x, graph_data):
         pool_ctr = 0
         x = self.enc_conv_in(x, graph_data['face_neighborhood'], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.down_0_block_0(x, graph_data['face_neighborhood'], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
-        x_0 = self.down_0_block_1(x, graph_data['face_neighborhood'], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
-        x = pool(x_0, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+        x = self.down_0_block_1(x, graph_data['face_neighborhood'], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
         pool_ctr += 1
 
         x = self.down_1_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
-        x_1 = self.down_1_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
-        x = pool(x_1, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+        x = self.down_1_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
         pool_ctr += 1
 
         x = self.down_2_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
-        x_2 = self.down_2_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        x = self.down_2_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         if self.num_pools == 5:
-            x = pool(x_2, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+            x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
             pool_ctr += 1
 
         x = self.down_3_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
-        x_3 = self.down_3_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
-        x = pool(x_3, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+        x = self.down_3_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
         pool_ctr += 1
 
         x = self.down_4_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         # x = self.down_4_attn_block_0(x)
-        x_4 = self.down_4_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        x = self.down_4_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         # x = self.down_4_attn_block_1(x)
-        x = pool(x_4, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
         pool_ctr += 1
 
         x = self.enc_mid_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
@@ -799,16 +824,14 @@ class BigFaceEncoderDecoder(nn.Module):
         # x = self.up_4_attn_block_2(x)
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
-
-        # x = torch.cat([x, x_3], dim=1)
+        x = self.blur_4(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
 
         x = self.up_3_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.up_3_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.up_3_block_2(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
-
-        # x = torch.cat([x, x_2], dim=1)
+        x = self.blur_3(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
 
         x = self.up_2_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.up_2_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
@@ -816,25 +839,25 @@ class BigFaceEncoderDecoder(nn.Module):
         if self.num_pools == 5:
             x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
             pool_ctr -= 1
-
-        # x = torch.cat([x, x_1], dim=1)
+            x = self.blur_2(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
 
         x = self.up_1_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.up_1_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.up_1_block_2(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
-
-        # x = torch.cat([x, x_0], dim=1)
+        x = self.blur_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
 
         x = self.up_0_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.up_0_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.up_0_block_2(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
+        x = self.blur_0(x, graph_data['face_neighborhood'], graph_data['is_pad'][0], graph_data['pads'][0])
 
+        x = self.dec_out_block(x, graph_data['face_neighborhood'], graph_data['is_pad'][0], graph_data['pads'][0])
         x = self.dec_out_norm(x)
         x = self.activation(x)
-        x = self.dec_out_conv(x, graph_data['face_neighborhood'], graph_data['is_pad'][0], graph_data['pads'][0])
+        x = self.dec_out_linear(x)
 
         return self.tanh(x) * 0.5
