@@ -5,6 +5,7 @@ lightning_logs/
 runs/
 runs
 slurm/inference/
+slurm/groups/
 *.pyd
 data_processing/sdf_gen/bin
 data_processing/sdf_gen/build

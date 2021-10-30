@@ -224,28 +224,30 @@ class GAttnBlock(nn.Module):
         self.v = nn.Linear(nf, nf)
         self.proj_out = nn.Linear(nf, nf)
 
-    def forward(self, x):
-        h_ = x
-        h_ = self.norm(h_)
-        q = self.q(h_)
-        k = self.k(h_)
-        v = self.v(h_)
+    def forward(self, x, batch):
+        x = self.norm(x)
+        batch_size = batch.max() + 1
+        for i in range(batch_size):
+            h_ = x[batch == i, :]
+            q = self.q(h_)
+            k = self.k(h_)
+            v = self.v(h_)
 
-        N, c = q.shape
+            N, c = q.shape
 
-        q = q.unsqueeze(0)
-        k = k.t().unsqueeze(0)
-        w_ = torch.bmm(q, k)
-        w_ = w_ * (int(c) ** (-0.5))
-        w_ = torch.nn.functional.softmax(w_, dim=2)
+            q = q.unsqueeze(0)
+            k = k.t().unsqueeze(0)
+            w_ = torch.bmm(q, k)
+            w_ = w_ * (int(c) ** (-0.5))
+            w_ = torch.nn.functional.softmax(w_, dim=2)
 
-        v = v.t().unsqueeze(0)
-        w_ = w_.permute(0, 2, 1)
-        h_ = torch.bmm(v, w_)
-        h_ = h_.squeeze(0).permute((1, 0))
-        h_ = self.proj_out(h_)
-
-        return x + h_
+            v = v.t().unsqueeze(0)
+            w_ = w_.permute(0, 2, 1)
+            h_ = torch.bmm(v, w_)
+            h_ = h_.squeeze(0).permute((1, 0))
+            h_ = self.proj_out(h_)
+            x[batch == i, :] += h_
+        return x
 
 
 class BigGraphSAGEEncoderDecoder(nn.Module):
@@ -691,11 +693,12 @@ class FResNetBlock(nn.Module):
 
 class BigFaceEncoderDecoder(nn.Module):
 
-    def __init__(self, in_channels, out_channels, nf, conv_layer, input_transform=None, num_pools=5, norm=GraphNorm, use_blur=True):
+    def __init__(self, in_channels, out_channels, nf, conv_layer, input_transform=None, num_pools=5, norm=GraphNorm, use_blur=True, use_self_attn=True):
         super().__init__()
         if input_transform is None:
             input_transform = conv_layer
         self.use_blur = use_blur
+        self.use_self_attn = use_self_attn
         self.num_pools = num_pools
         self.activation = nn.LeakyReLU()
         self.enc_conv_in = input_transform(in_channels, nf)
@@ -713,11 +716,16 @@ class BigFaceEncoderDecoder(nn.Module):
 
         self.down_4_block_0 = FResNetBlock(nf * 2, nf * 4, conv_layer, norm, self.activation)
         self.down_4_block_1 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
-        # self.down_4_attn_block_0 = GAttnBlock(nf * 4, conv_layer, norm)
-        # self.down_4_attn_block_1 = GAttnBlock(nf * 4, conv_layer, norm)
+        self.down_4_attn_block_0 = self.down_4_attn_block_1 = lambda x, b: x
+        if self.use_self_attn:
+            self.down_4_attn_block_0 = GAttnBlock(nf * 4, norm)
+            self.down_4_attn_block_1 = GAttnBlock(nf * 4, norm)
+
 
         self.enc_mid_block_0 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
-        # self.enc_mid_attn_0 = GAttnBlock(nf * 4, conv_layer, norm)
+        self.enc_mid_attn_0 = lambda x, b: x
+        if self.use_self_attn:
+            self.enc_mid_attn_0 = GAttnBlock(nf * 4, norm)
         self.enc_mid_block_1 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
 
         self.enc_out_conv = conv_layer(nf * 4, nf * 2)
@@ -726,7 +734,9 @@ class BigFaceEncoderDecoder(nn.Module):
         self.dec_conv_in = conv_layer(nf * 2, nf * 4)
 
         self.dec_mid_block_0 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
-        # self.dec_mid_attn_0 = GAttnBlock(nf * 4, conv_layer, norm)
+        self.dec_mid_attn_0 = lambda x, b: x
+        if self.use_self_attn:
+            self.dec_mid_attn_0 = GAttnBlock(nf * 4, norm)
         self.dec_mid_block_1 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
 
         self.up_0_block_0 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
@@ -758,9 +768,11 @@ class BigFaceEncoderDecoder(nn.Module):
         self.up_4_block_2 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
         if self.use_blur:
             self.blur_4 = Blur(nf * 4)
-        # self.up_4_attn_block_0 = GAttnBlock(nf * 4, conv_layer, norm)
-        # self.up_4_attn_block_1 = GAttnBlock(nf * 4, conv_layer, norm)
-        # self.up_4_attn_block_2 = GAttnBlock(nf * 4, conv_layer, norm)
+        self.up_4_attn_block_0 = self.up_4_attn_block_1 = self.up_4_attn_block_2 = lambda x, b: x
+        if self.use_self_attn:
+            self.up_4_attn_block_0 = GAttnBlock(nf * 4, norm)
+            self.up_4_attn_block_1 = GAttnBlock(nf * 4, norm)
+            self.up_4_attn_block_2 = GAttnBlock(nf * 4, norm)
 
         self.dec_out_block = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
         self.dec_out_norm = norm(nf)
@@ -793,14 +805,14 @@ class BigFaceEncoderDecoder(nn.Module):
         pool_ctr += 1
 
         x = self.down_4_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
-        # x = self.down_4_attn_block_0(x)
+        x = self.down_4_attn_block_0(x, graph_data['level_masks'][pool_ctr])
         x = self.down_4_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
-        # x = self.down_4_attn_block_1(x)
+        x = self.down_4_attn_block_1(x, graph_data['level_masks'][pool_ctr])
         x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
         pool_ctr += 1
 
         x = self.enc_mid_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
-        # x = self.enc_mid_attn_0(x)
+        x = self.enc_mid_attn_0(x, graph_data['level_masks'][pool_ctr])
         x = self.enc_mid_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
 
         x = self.enc_out_norm(x)
@@ -810,15 +822,15 @@ class BigFaceEncoderDecoder(nn.Module):
         x = self.dec_conv_in(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
 
         x = self.dec_mid_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
-        # x = self.dec_mid_attn_0(x)
+        x = self.dec_mid_attn_0(x, graph_data['level_masks'][pool_ctr])
         x = self.dec_mid_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
 
         x = self.up_4_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
-        # x = self.up_4_attn_block_0(x)
+        x = self.up_4_attn_block_0(x, graph_data['level_masks'][pool_ctr])
         x = self.up_4_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
-        # x = self.up_4_attn_block_1(x)
+        x = self.up_4_attn_block_1(x, graph_data['level_masks'][pool_ctr])
         x = self.up_4_block_2(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
-        # x = self.up_4_attn_block_2(x)
+        x = self.up_4_attn_block_2(x, graph_data['level_masks'][pool_ctr])
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
         if self.use_blur:

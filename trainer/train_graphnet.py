@@ -1,5 +1,6 @@
 import random
 import shutil
+import signal
 import time
 from pathlib import Path
 from random import randint
@@ -19,7 +20,7 @@ from dataset.graph_mesh_dataset import GraphMeshDataset, FaceGraphMeshDataset, t
 from model.augmentation import rgb_shift, channel_dropout, channel_shuffle, random_gamma, random_brightness_contrast
 from model.graphnet import BigGraphSAGEEncoderDecoder, BigFaceEncoderDecoder, FaceConv, SymmetricFaceConv, SpatialAttentionConv, WrappedLinear
 from util.feature_loss import FeatureLossHelper
-from util.misc import print_model_parameter_count
+from util.misc import print_model_parameter_count, register_debug_signal_handlers, register_quit_signal_handlers
 from util.regression_loss import RegressionLossHelper
 
 torch.backends.cudnn.benchmark = True
@@ -44,7 +45,7 @@ class GraphNetTrainer:
             input_feats = 3 + 3 + 1
             if not config.dataset.plane:
                 input_feats += 6
-            model = BigGraphSAGEEncoderDecoder(input_feats, 3, 128, 'max', num_pools=config.dataset.num_pools, norm=norm)
+            model = BigGraphSAGEEncoderDecoder(input_feats, 3, config.nf, 'max', num_pools=config.dataset.num_pools, norm=norm)
         else:
             trainset = FaceGraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
             valset = FaceGraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view, use_all_views=False)
@@ -55,13 +56,13 @@ class GraphNetTrainer:
                 input_feats += 3
             if config.conv == 'cartesian':
                 conv_layer = lambda in_channels, out_channels: FaceConv(in_channels, out_channels, 8)
-                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools, norm=norm, use_blur=config.use_blur)
+                model = BigFaceEncoderDecoder(input_feats, 3, config.nf, conv_layer, num_pools=config.dataset.num_pools, norm=norm, use_blur=config.use_blur, use_self_attn=config.use_self_attn)
             elif config.conv == 'symmetric':
                 conv_layer = lambda in_channels, out_channels: SymmetricFaceConv(in_channels, out_channels)
-                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools, norm=norm, use_blur=config.use_blur)
+                model = BigFaceEncoderDecoder(input_feats, 3, config.nf, conv_layer, num_pools=config.dataset.num_pools, norm=norm, use_blur=config.use_blur, use_self_attn=config.use_self_attn)
             elif config.conv == 'attention':
                 conv_layer = lambda in_channels, out_channels: SpatialAttentionConv(in_channels, out_channels)
-                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools, input_transform=WrappedLinear, norm=norm, use_blur=config.use_blur)
+                model = BigFaceEncoderDecoder(input_feats, 3, config.nf, conv_layer, num_pools=config.dataset.num_pools, input_transform=WrappedLinear, norm=norm, use_blur=config.use_blur, use_self_attn=config.use_self_attn)
 
         print(model)
         print_model_parameter_count(model)
@@ -297,9 +298,14 @@ def main(config):
         config.val_check_interval = int(config.val_check_interval)
     if config.seed is None:
         config.seed = randint(0, 999)
+    # config.lr = config.batch_size * config.lr
     ds_name = '_'.join(config.dataset.name.split('/'))
     logger = wandb.init(project=f'GATNet{config.suffix}[{ds_name}]', name=config.experiment, id=config.experiment)
     seed_everything(config.seed)
+
+    register_debug_signal_handlers()
+    register_quit_signal_handlers()
+
     trainer = GraphNetTrainer(config, logger)
     trainer.train()
 

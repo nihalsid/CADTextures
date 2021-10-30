@@ -1,3 +1,6 @@
+import signal
+import sys
+import traceback
 from collections import OrderedDict
 from pathlib import Path
 import numpy as np
@@ -108,3 +111,24 @@ class DotDict(dict):
     __getattr__ = dict.get
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
+
+
+def print_traceback_handler(sig, frame):
+    print(f'Received signal {sig}')
+    bt = ''.join(traceback.format_stack())
+    print(f'Requested stack trace:\n{bt}')
+
+
+def quit_handler(sig, frame):
+    print(f'Received signal {sig}, quitting.')
+    sys.exit(1)
+
+
+def register_debug_signal_handlers(sig=signal.SIGUSR1, handler=print_traceback_handler):
+    print(f'Setting signal {sig} handler {handler}')
+    signal.signal(sig, handler)
+
+
+def register_quit_signal_handlers(sig=signal.SIGUSR2, handler=quit_handler):
+    print(f'Setting signal {sig} handler {handler}')
+    signal.signal(sig, handler)
