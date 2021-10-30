@@ -47,7 +47,16 @@ class GraphMeshDataset(Dataset):
             self.mask = lambda x, bs: torch.ones((x.shape[0],)).float().to(x.device)
             split_name = config.dataset.name.split('/')
             mesh = trimesh.load(Path(config.dataset.data_dir, split_name[0] + '-model', split_name[1]) / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
-            self.vertex_to_uv = np.array(mesh.visual.uv)
+            vertex_to_uv = np.array(mesh.visual.uv)
+            self.indices_dest_i = []
+            self.indices_dest_j = []
+            self.indices_src = []
+            for v_idx in range(vertex_to_uv.shape[0]):
+                j = int(round(vertex_to_uv[v_idx][0] * 127))
+                i = 127 - int(round(vertex_to_uv[v_idx][1] * 127))
+                self.indices_dest_i.append(i)
+                self.indices_dest_j.append(j)
+                self.indices_src.append(v_idx)
             self.to_image = self.mesh_to_image
         else:
             if use_single_view:
@@ -133,11 +142,12 @@ class GraphMeshDataset(Dataset):
             indexed_items = [x for x in self.items if x[0] == unique_items[idx]]
             selected_item = random.choice(indexed_items)
         data = torch.load(os.path.join(self.processed_dir, f'{self.item_to_name(selected_item)}.pt'))
+        level_masks = [torch.zeros(shape).long() for shape in [data.x.shape[0]] + data.num_sub_vertices.numpy().tolist()]
         return {
             "name": data.name,
             "x": data.x,
             "y": data.y,
-            "graph_data": self.get_item_as_graphdata(data.edge_index, data.sub_edges, data.num_sub_vertices, data.pool_maps)
+            "graph_data": self.get_item_as_graphdata(data.edge_index, data.sub_edges, data.num_sub_vertices, data.pool_maps, level_masks)
         }
 
     def read_mesh_data(self, path_all, path_input, x, y):
@@ -176,22 +186,28 @@ class GraphMeshDataset(Dataset):
             sort_index_i += 1
         return image
 
-    def mesh_to_image(self, vertex_colors):
-        image = torch.zeros((3, 128, 128)).float().to(vertex_colors.device)
-        for v_idx in range(vertex_colors.shape[0]):
-            j = int(round(self.vertex_to_uv[v_idx][0] * 127))
-            i = 127 - int(round(self.vertex_to_uv[v_idx][1] * 127))
-            image[:, i, j] = vertex_colors[v_idx, :]
+    def mesh_to_image(self, vertex_colors, level_mask):
+        batch_size = level_mask.max() + 1
+        image = torch.zeros((batch_size, 3, 128, 128), device=vertex_colors.device)
+        indices_dest_i = torch.tensor(self.indices_dest_i * batch_size, device=vertex_colors.device).long()
+        indices_dest_j = torch.tensor(self.indices_dest_j * batch_size, device=vertex_colors.device).long()
+        indices_src = torch.tensor(self.indices_src * batch_size, device=vertex_colors.device).long()
+        image[level_mask, :, indices_dest_i, indices_dest_j] = vertex_colors[indices_src + level_mask * len(self.indices_src), :]
         return image
 
     @staticmethod
-    def get_item_as_graphdata(edge_index, sub_edges, num_sub_vertices, pool_maps):
+    def get_item_as_graphdata(edge_index, sub_edges, num_sub_vertices, pool_maps, level_masks):
         return DotDict({
             'edge_index': edge_index,
             'sub_edges': sub_edges,
             'node_counts': num_sub_vertices,
             'pool_maps': pool_maps,
+            'level_masks': level_masks
         })
+
+    @staticmethod
+    def batch_mask(t, graph_data, idx, level=0):
+        return t[graph_data['level_masks'][level] == idx]
 
 
 class FaceGraphMeshDataset(torch.utils.data.Dataset):
@@ -373,7 +389,7 @@ class Collater(object):
         self.exclude_keys = exclude_keys
 
     @staticmethod
-    def cat_collate(batch):
+    def cat_collate(batch, dim=0):
         elem = batch[0]
         if isinstance(elem, torch.Tensor):
             out = None
@@ -383,7 +399,7 @@ class Collater(object):
                 numel = sum([x.numel() for x in batch])
                 storage = elem.storage()._new_shared(numel)
                 out = elem.new(storage)
-            return torch.cat(batch, 0, out=out)
+            return torch.cat(batch, dim, out=out)
         raise NotImplementedError
 
     def collate(self, batch):
@@ -442,7 +458,38 @@ class Collater(object):
 
                 return batch_dot_dict
             else:  # graph conv data
-                raise NotImplementedError
+                edge_index, sub_edges, node_counts, pool_maps, level_masks = [], [], [], [], []
+                pad_sum = 0
+                for b_i in range(len(batch)):
+                    edge_index.append(batch[b_i].edge_index + pad_sum)
+                    pad_sum += batch[b_i].pool_maps[0].shape[0]
+
+                for sub_i in range(len(elem.sub_edges) + 1):
+                    for b_i in range(len(batch)):
+                        batch[b_i].level_masks[sub_i][:] = b_i
+                    level_masks.append(self.cat_collate([batch[b_i].level_masks[sub_i] for b_i in range(len(batch))]))
+
+                for sub_i in range(len(elem.sub_edges)):
+                    sub_n = []
+                    pool_n = []
+                    node_count_n = 0
+                    for b_i in range(len(batch)):
+                        sub_n.append(batch[b_i].sub_edges[sub_i] + node_count_n)
+                        pool_n.append(batch[b_i].pool_maps[sub_i] + node_count_n)
+                        node_count_n += batch[b_i].node_counts[sub_i]
+                    sub_edges.append(self.cat_collate(sub_n, dim=1))
+                    node_counts.append(node_count_n)
+                    pool_maps.append(self.cat_collate(pool_n))
+
+                batch_dot_dict = {
+                    'edge_index': self.cat_collate(edge_index, dim=1),
+                    'sub_edges': sub_edges,
+                    'node_counts': node_counts,
+                    'pool_maps': pool_maps,
+                    'level_masks': level_masks
+                }
+
+                return batch_dot_dict
         elif isinstance(elem, Mapping):
             retdict = {}
             for key in elem:

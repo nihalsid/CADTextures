@@ -295,13 +295,14 @@ class TextureEnd2EndDataset(torch.utils.data.Dataset):
         refinement_batch = [self.denormalize_and_rgb(np.transpose(refinement_batch[i, :, :, :], (1, 2, 0))) for i in range(refinement_batch.shape[0])]
 
         f, axarr = plt.subplots(3, len(input_batch), figsize=(4 * len(input_batch), 4 * 3))
+        access_axarr = (lambda x, y: axarr[x, y]) if len(input_batch) > 1 else (lambda x, y: axarr[x])
         for i in range(len(input_batch)):
-            axarr[0, i].imshow(input_batch[i])
-            axarr[0, i].axis('off')
-            axarr[1, i].imshow(target_batch[i])
-            axarr[1, i].axis('off')
-            axarr[2, i].imshow(refinement_batch[i])
-            axarr[2, i].axis('off')
+            access_axarr(0, i).imshow(input_batch[i])
+            access_axarr(0, i).axis('off')
+            access_axarr(1, i).imshow(target_batch[i])
+            access_axarr(1, i).axis('off')
+            access_axarr(2, i).imshow(refinement_batch[i])
+            access_axarr(2, i).axis('off')
 
         plt.tight_layout()
         plt.savefig(outpath("out_"), bbox_inches='tight', dpi=60)

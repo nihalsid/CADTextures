@@ -28,7 +28,7 @@ class TextureRegressionModule(pl.LightningModule):
         encoder = lambda in_channels, z_channels: EncoderReduced(ch=128, out_ch=3, ch_mult=(1, 1, 2, 2, 4), num_res_blocks=2, attn_resolutions=[8], dropout=0.0, resamp_with_conv=True, in_channels=in_channels, resolution=128, z_channels=z_channels, use_unfold=False, double_z=False)
         self.fenc_input = encoder(4, config.fenc_zdim)
         self.regression_loss = RegressionLossHelper(self.hparams.regression_loss_type)
-        self.feature_loss_helper = FeatureLossHelper(['relu4_2'], ['relu3_2', 'relu4_2'], 'lll')
+        # self.feature_loss_helper = FeatureLossHelper(['relu4_2'], ['relu3_2', 'relu4_2'], 'lll')
         self.mse_loss = torch.nn.MSELoss(reduction='mean')
         self.dataset = lambda split: TextureEnd2EndDataset(config, split, self.preload_dict)
         self.train_dataset = self.dataset('train')
@@ -116,7 +116,8 @@ class TextureRegressionModule(pl.LightningModule):
         self.log("val/loss_ref_regression", total_loss_ref_regression, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True)
 
     def on_train_start(self):
-        self.feature_loss_helper.move_to_device(self.device)
+        pass
+        # self.feature_loss_helper.move_to_device(self.device)
 
 
 @hydra.main(config_path='../config', config_name='texture_deform')

@@ -9,7 +9,7 @@ def test_blur_pooling():
     mesh_decimations = ["surface_texture"] + [f"decimate_{i}" for i in range(1, 6)]
     meshes = [trimesh.load(f"data/SingleShape/CubeTexturePlaneQuad/coloredbrodatz_D48_COLORED/{x}.obj", process=False) for x in mesh_decimations]
     blur = Blur(3)
-
+    trimesh.Trimesh(vertices=meshes[0].vertices, faces=meshes[0].faces, face_colors=(pt_arxiv['target_colors'] + 0.5).numpy(), process=False).export(f'input.obj')
     y = pool(pt_arxiv['target_colors'] + 0.5, pt_arxiv['conv_data'][1][0].shape[0], pt_arxiv['pool_locations'][0], pool_op='mean')
     y = pool(y, pt_arxiv['conv_data'][2][0].shape[0], pt_arxiv['pool_locations'][1], pool_op='mean')
     y = pool(y, pt_arxiv['conv_data'][3][0].shape[0], pt_arxiv['pool_locations'][2], pool_op='mean')

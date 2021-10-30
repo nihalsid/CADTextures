@@ -9,6 +9,7 @@ import torch
 import wandb
 from PIL import Image
 from pytorch_lightning import seed_everything
+from torch_geometric.nn import BatchNorm, GraphNorm
 from tqdm import tqdm
 
 from dataset.graph_mesh_dataset import GraphMeshDataset, FaceGraphMeshDataset, to_device, GraphDataLoader
@@ -27,7 +28,10 @@ class GraphNetTrainer:
         # declare device
         self.device = torch.device('cuda:0')
         model = None
-
+        if config.batch_size > 1:
+            norm = BatchNorm
+        else:
+            norm = GraphNorm
         # instantiate model
         if config.method == 'graph':
             trainset = GraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
@@ -36,7 +40,7 @@ class GraphNetTrainer:
             input_feats = 3 + 3 + 1
             if not config.dataset.plane:
                 input_feats += 6
-            model = BigGraphSAGEEncoderDecoder(input_feats, 3, 256, 'max', num_pools=config.dataset.num_pools)
+            model = BigGraphSAGEEncoderDecoder(input_feats, 3, 128, 'max', num_pools=config.dataset.num_pools, norm=norm)
         else:
             trainset = FaceGraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
             valset = FaceGraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view, use_all_views=False)
@@ -46,14 +50,15 @@ class GraphNetTrainer:
                 input_feats += 3
             if config.conv == 'cartesian':
                 conv_layer = lambda in_channels, out_channels: FaceConv(in_channels, out_channels, 8)
-                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools)
+                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools, norm=norm)
             elif config.conv == 'symmetric':
                 conv_layer = lambda in_channels, out_channels: SymmetricFaceConv(in_channels, out_channels)
-                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools)
+                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools, norm=norm)
             elif config.conv == 'attention':
                 conv_layer = lambda in_channels, out_channels: SpatialAttentionConv(in_channels, out_channels)
-                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools, input_transform=WrappedLinear)
+                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools, input_transform=WrappedLinear, norm=norm)
 
+        print(model)
         print_model_parameter_count(model)
 
         # load model if resuming from checkpoint
@@ -212,11 +217,13 @@ class GraphNetTrainer:
                         prediction = prediction[:sample_val["y"].shape[0], :]
 
                     mask = self.valset.mask(sample_val["y"], self.config.batch_size).unsqueeze(-1)
+                    input_as_image = self.valset.to_image((sample_val["x"][:, 3:6] * mask), sample_val["graph_data"]["level_masks"][0])
                     prediction_as_image = self.valset.to_image((prediction * mask), sample_val["graph_data"]["level_masks"][0])
                     target_as_image = self.valset.to_image((sample_val["y"] * mask), sample_val["graph_data"]["level_masks"][0])
 
                     Path(f"runs/{self.config.experiment}/visualization/epoch_{epoch:05d}/").mkdir(exist_ok=True, parents=True)
                     for bi in range(sample_val["graph_data"]["level_masks"][0].max() + 1):
+                        Image.fromarray(((input_as_image[bi].permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}/in_{sample_val["name"][bi]}.png')
                         Image.fromarray(((prediction_as_image[bi].permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}/pred_{sample_val["name"][bi]}.png')
                         Image.fromarray(((target_as_image[bi].permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}/tgt_{sample_val["name"][bi]}.png')
                         yi_masked = self.valset.batch_mask((sample_val["y"] * mask), sample_val['graph_data'], bi)

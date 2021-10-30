@@ -250,10 +250,9 @@ class GAttnBlock(nn.Module):
 
 class BigGraphSAGEEncoderDecoder(nn.Module):
 
-    def __init__(self, in_channels, out_channels, nf, aggr, num_pools=5):
+    def __init__(self, in_channels, out_channels, nf, aggr, num_pools=5, norm=GraphNorm):
         super().__init__()
         self.num_pools = num_pools
-        norm = GraphNorm
         self.activation = nn.LeakyReLU(0.02)
         self.enc_conv_in = SAGEConv(in_channels, nf, aggr=aggr)
 
@@ -316,93 +315,93 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
 
     def forward(self, x, graph_data):
         pool_ctr = 0
-        x = self.enc_conv_in(x, graph_data.edge_index)
-        x = self.down_0_block_0(x, graph_data.edge_index)
-        x_0 = self.down_0_block_1(x, graph_data.edge_index)
+        x = self.enc_conv_in(x, graph_data['edge_index'])
+        x = self.down_0_block_0(x, graph_data['edge_index'])
+        x_0 = self.down_0_block_1(x, graph_data['edge_index'])
         x = pool(x_0, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
         pool_ctr += 1
 
-        x = self.down_1_block_0(x, graph_data.sub_edges[pool_ctr - 1])
-        x_1 = self.down_1_block_1(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.down_1_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
+        x_1 = self.down_1_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
         x = pool(x_1, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
         pool_ctr += 1
 
-        x = self.down_2_block_0(x, graph_data.sub_edges[pool_ctr - 1])
-        x_2 = self.down_2_block_1(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.down_2_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
+        x_2 = self.down_2_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
         if self.num_pools == 5:
             x = pool(x_2, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
             pool_ctr += 1
 
-        x = self.down_3_block_0(x, graph_data.sub_edges[pool_ctr - 1])
-        x_3 = self.down_3_block_1(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.down_3_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
+        x_3 = self.down_3_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
         x = pool(x_3, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
         pool_ctr += 1
 
-        x = self.down_4_block_0(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.down_4_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
         # x = self.down_4_attn_block_0(x)
-        x_4 = self.down_4_block_1(x, graph_data.sub_edges[pool_ctr - 1])
+        x_4 = self.down_4_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
         # x = self.down_4_attn_block_1(x)
         x = pool(x_4, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
         pool_ctr += 1
 
-        x = self.enc_mid_block_0(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.enc_mid_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
         # x = self.enc_mid_attn_0(x)
-        x = self.enc_mid_block_1(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.enc_mid_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
 
         x = self.enc_out_norm(x)
         x = self.activation(x)
-        x = self.enc_out_conv(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.enc_out_conv(x, graph_data['sub_edges'][pool_ctr - 1])
 
-        x = self.dec_conv_in(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.dec_conv_in(x, graph_data['sub_edges'][pool_ctr - 1])
 
-        x = self.dec_mid_block_0(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.dec_mid_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
         # x = self.dec_mid_attn_0(x)
-        x = self.dec_mid_block_1(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.dec_mid_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
 
-        x = self.up_4_block_0(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_4_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
         # x = self.up_4_attn_block_0(x)
-        x = self.up_4_block_1(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_4_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
         # x = self.up_4_attn_block_1(x)
-        x = self.up_4_block_2(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_4_block_2(x, graph_data['sub_edges'][pool_ctr - 1])
         # x = self.up_4_attn_block_2(x)
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
         # x = torch.cat([x, x_3], dim=1)
 
-        x = self.up_3_block_0(x, graph_data.sub_edges[pool_ctr - 1])
-        x = self.up_3_block_1(x, graph_data.sub_edges[pool_ctr - 1])
-        x = self.up_3_block_2(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_3_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
+        x = self.up_3_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
+        x = self.up_3_block_2(x, graph_data['sub_edges'][pool_ctr - 1])
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
 
         # x = torch.cat([x, x_2], dim=1)
 
-        x = self.up_2_block_0(x, graph_data.sub_edges[pool_ctr - 1])
-        x = self.up_2_block_1(x, graph_data.sub_edges[pool_ctr - 1])
-        x = self.up_2_block_2(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_2_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
+        x = self.up_2_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
+        x = self.up_2_block_2(x, graph_data['sub_edges'][pool_ctr - 1])
         if self.num_pools == 5:
             x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
             pool_ctr -= 1
 
         # x = torch.cat([x, x_1], dim=1)
 
-        x = self.up_1_block_0(x, graph_data.sub_edges[pool_ctr - 1])
-        x = self.up_1_block_1(x, graph_data.sub_edges[pool_ctr - 1])
-        x = self.up_1_block_2(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_1_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
+        x = self.up_1_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
+        x = self.up_1_block_2(x, graph_data['sub_edges'][pool_ctr - 1])
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
 
         # x = torch.cat([x, x_0], dim=1)
 
-        x = self.up_0_block_0(x, graph_data.sub_edges[pool_ctr - 1])
-        x = self.up_0_block_1(x, graph_data.sub_edges[pool_ctr - 1])
-        x = self.up_0_block_2(x, graph_data.sub_edges[pool_ctr - 1])
+        x = self.up_0_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
+        x = self.up_0_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
+        x = self.up_0_block_2(x, graph_data['sub_edges'][pool_ctr - 1])
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
 
         x = self.dec_out_norm(x)
         x = self.activation(x)
-        x = self.dec_out_conv(x, graph_data.edge_index)
+        x = self.dec_out_conv(x, graph_data['edge_index'])
 
         return self.tanh(x) * 0.5
 
@@ -699,12 +698,11 @@ class FResNetBlock(nn.Module):
 
 class BigFaceEncoderDecoder(nn.Module):
 
-    def __init__(self, in_channels, out_channels, nf, conv_layer, input_transform=None, num_pools=5):
+    def __init__(self, in_channels, out_channels, nf, conv_layer, input_transform=None, num_pools=5, norm=GraphNorm):
         super().__init__()
         if input_transform is None:
             input_transform = conv_layer
         self.num_pools = num_pools
-        norm = BatchNorm
         self.activation = nn.LeakyReLU()
         self.enc_conv_in = input_transform(in_channels, nf)
         self.down_0_block_0 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
