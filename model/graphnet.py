@@ -317,31 +317,31 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
         pool_ctr = 0
         x = self.enc_conv_in(x, graph_data['edge_index'])
         x = self.down_0_block_0(x, graph_data['edge_index'])
-        x_0 = self.down_0_block_1(x, graph_data['edge_index'])
-        x = pool(x_0, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+        x = self.down_0_block_1(x, graph_data['edge_index'])
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
         pool_ctr += 1
 
         x = self.down_1_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
-        x_1 = self.down_1_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
-        x = pool(x_1, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+        x = self.down_1_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
         pool_ctr += 1
 
         x = self.down_2_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
-        x_2 = self.down_2_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
+        x = self.down_2_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
         if self.num_pools == 5:
-            x = pool(x_2, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+            x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
             pool_ctr += 1
 
         x = self.down_3_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
-        x_3 = self.down_3_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
-        x = pool(x_3, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+        x = self.down_3_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
         pool_ctr += 1
 
         x = self.down_4_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
         # x = self.down_4_attn_block_0(x)
-        x_4 = self.down_4_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
+        x = self.down_4_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
         # x = self.down_4_attn_block_1(x)
-        x = pool(x_4, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
+        x = pool(x, graph_data['node_counts'][pool_ctr], graph_data['pool_maps'][pool_ctr], pool_op='max')
         pool_ctr += 1
 
         x = self.enc_mid_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
@@ -366,15 +366,12 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
         # x = self.up_4_attn_block_2(x)
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
-        # x = torch.cat([x, x_3], dim=1)
 
         x = self.up_3_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
         x = self.up_3_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
         x = self.up_3_block_2(x, graph_data['sub_edges'][pool_ctr - 1])
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
-
-        # x = torch.cat([x, x_2], dim=1)
 
         x = self.up_2_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
         x = self.up_2_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
@@ -383,15 +380,11 @@ class BigGraphSAGEEncoderDecoder(nn.Module):
             x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
             pool_ctr -= 1
 
-        # x = torch.cat([x, x_1], dim=1)
-
         x = self.up_1_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
         x = self.up_1_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
         x = self.up_1_block_2(x, graph_data['sub_edges'][pool_ctr - 1])
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
-
-        # x = torch.cat([x, x_0], dim=1)
 
         x = self.up_0_block_0(x, graph_data['sub_edges'][pool_ctr - 1])
         x = self.up_0_block_1(x, graph_data['sub_edges'][pool_ctr - 1])
@@ -698,10 +691,11 @@ class FResNetBlock(nn.Module):
 
 class BigFaceEncoderDecoder(nn.Module):
 
-    def __init__(self, in_channels, out_channels, nf, conv_layer, input_transform=None, num_pools=5, norm=GraphNorm):
+    def __init__(self, in_channels, out_channels, nf, conv_layer, input_transform=None, num_pools=5, norm=GraphNorm, use_blur=True):
         super().__init__()
         if input_transform is None:
             input_transform = conv_layer
+        self.use_blur = use_blur
         self.num_pools = num_pools
         self.activation = nn.LeakyReLU()
         self.enc_conv_in = input_transform(in_channels, nf)
@@ -738,27 +732,32 @@ class BigFaceEncoderDecoder(nn.Module):
         self.up_0_block_0 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
         self.up_0_block_1 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
         self.up_0_block_2 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
-        self.blur_0 = Blur(nf)
+        if self.use_blur:
+            self.blur_0 = Blur(nf)
 
         self.up_1_block_0 = FResNetBlock(nf * 2, nf, conv_layer, norm, self.activation)
         self.up_1_block_1 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
         self.up_1_block_2 = FResNetBlock(nf, nf, conv_layer, norm, self.activation)
-        self.blur_1 = Blur(nf)
+        if self.use_blur:
+            self.blur_1 = Blur(nf)
 
         self.up_2_block_0 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
         self.up_2_block_1 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
         self.up_2_block_2 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
-        self.blur_2 = Blur(nf * 2)
+        if self.use_blur:
+            self.blur_2 = Blur(nf * 2)
 
         self.up_3_block_0 = FResNetBlock(nf * 4, nf * 2, conv_layer, norm, self.activation)
         self.up_3_block_1 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
         self.up_3_block_2 = FResNetBlock(nf * 2, nf * 2, conv_layer, norm, self.activation)
-        self.blur_3 = Blur(nf * 2)
+        if self.use_blur:
+            self.blur_3 = Blur(nf * 2)
 
         self.up_4_block_0 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
         self.up_4_block_1 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
         self.up_4_block_2 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
-        self.blur_4 = Blur(nf * 4)
+        if self.use_blur:
+            self.blur_4 = Blur(nf * 4)
         # self.up_4_attn_block_0 = GAttnBlock(nf * 4, conv_layer, norm)
         # self.up_4_attn_block_1 = GAttnBlock(nf * 4, conv_layer, norm)
         # self.up_4_attn_block_2 = GAttnBlock(nf * 4, conv_layer, norm)
@@ -822,14 +821,16 @@ class BigFaceEncoderDecoder(nn.Module):
         # x = self.up_4_attn_block_2(x)
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
-        x = self.blur_4(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        if self.use_blur:
+            x = self.blur_4(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
 
         x = self.up_3_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.up_3_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.up_3_block_2(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
-        x = self.blur_3(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        if self.use_blur:
+            x = self.blur_3(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
 
         x = self.up_2_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.up_2_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
@@ -837,21 +838,24 @@ class BigFaceEncoderDecoder(nn.Module):
         if self.num_pools == 5:
             x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
             pool_ctr -= 1
-            x = self.blur_2(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+            if self.use_blur:
+                x = self.blur_2(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
 
         x = self.up_1_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.up_1_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.up_1_block_2(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
-        x = self.blur_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
+        if self.use_blur:
+            x = self.blur_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
 
         x = self.up_0_block_0(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.up_0_block_1(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = self.up_0_block_2(x, graph_data['sub_neighborhoods'][pool_ctr - 1], graph_data['is_pad'][pool_ctr], graph_data['pads'][pool_ctr])
         x = unpool(x, graph_data['pool_maps'][pool_ctr - 1])
         pool_ctr -= 1
-        x = self.blur_0(x, graph_data['face_neighborhood'], graph_data['is_pad'][0], graph_data['pads'][0])
+        if self.use_blur:
+            x = self.blur_0(x, graph_data['face_neighborhood'], graph_data['is_pad'][0], graph_data['pads'][0])
 
         x = self.dec_out_block(x, graph_data['face_neighborhood'], graph_data['is_pad'][0], graph_data['pads'][0])
         x = self.dec_out_norm(x)

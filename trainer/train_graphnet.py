@@ -1,4 +1,6 @@
 import random
+import shutil
+import time
 from pathlib import Path
 from random import randint
 
@@ -8,6 +10,7 @@ import numpy as np
 import torch
 import wandb
 from PIL import Image
+from cleanfid import fid
 from pytorch_lightning import seed_everything
 from torch_geometric.nn import BatchNorm, GraphNorm
 from tqdm import tqdm
@@ -36,6 +39,7 @@ class GraphNetTrainer:
         if config.method == 'graph':
             trainset = GraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
             valset = GraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view, use_all_views=False)
+            trainvalset = GraphMeshDataset(config, 'train_val', use_single_view=config.dataset.single_view, use_all_views=False)
             valvisset = GraphMeshDataset(config, 'val_vis', use_single_view=True)
             input_feats = 3 + 3 + 1
             if not config.dataset.plane:
@@ -44,19 +48,20 @@ class GraphNetTrainer:
         else:
             trainset = FaceGraphMeshDataset(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
             valset = FaceGraphMeshDataset(config, 'val', use_single_view=config.dataset.single_view, use_all_views=False)
+            trainvalset = FaceGraphMeshDataset(config, 'train_val', use_single_view=config.dataset.single_view, use_all_views=False)
             valvisset = FaceGraphMeshDataset(config, 'val_vis', use_single_view=True)
             input_feats = 3 + 3 + 1
             if not config.dataset.plane:
                 input_feats += 3
             if config.conv == 'cartesian':
                 conv_layer = lambda in_channels, out_channels: FaceConv(in_channels, out_channels, 8)
-                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools, norm=norm)
+                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools, norm=norm, use_blur=config.use_blur)
             elif config.conv == 'symmetric':
                 conv_layer = lambda in_channels, out_channels: SymmetricFaceConv(in_channels, out_channels)
-                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools, norm=norm)
+                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools, norm=norm, use_blur=config.use_blur)
             elif config.conv == 'attention':
                 conv_layer = lambda in_channels, out_channels: SpatialAttentionConv(in_channels, out_channels)
-                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools, input_transform=WrappedLinear, norm=norm)
+                model = BigFaceEncoderDecoder(input_feats, 3, 128, conv_layer, num_pools=config.dataset.num_pools, input_transform=WrappedLinear, norm=norm, use_blur=config.use_blur)
 
         print(model)
         print_model_parameter_count(model)
@@ -72,6 +77,7 @@ class GraphNetTrainer:
         self.trainset = trainset
         self.valset = valset
         self.valvisset = valvisset
+        self.trainvalset = trainvalset
         self.config = config
         self.logger = logger
 
@@ -100,6 +106,7 @@ class GraphNetTrainer:
         train_dataloader = GraphDataLoader(self.trainset, self.config.batch_size, shuffle=True, pin_memory=True, num_workers=self.config.num_workers)
         val_dataloader = GraphDataLoader(self.valset, self.config.batch_size, shuffle=False, num_workers=0)
         vis_dataloader = GraphDataLoader(self.valvisset, self.config.batch_size, shuffle=False, num_workers=0)
+        trainval_dataloader = GraphDataLoader(self.trainvalset, self.config.batch_size, shuffle=False, num_workers=0)
 
         for epoch in range(self.config.max_epoch):
             pbar = tqdm(list(enumerate(train_dataloader)), desc=f'Epoch {epoch:03d}')
@@ -163,48 +170,66 @@ class GraphNetTrainer:
 
             # validation evaluation and logging
             if epoch % self.config.val_check_interval == (self.config.val_check_interval - 1):
-
+                val_t0 = time.time()
                 # set model to eval, important if your network has e.g. dropout or batchnorm layers
                 self.model.eval()
 
-                loss_total_val_l1 = 0
-                loss_total_val_l2 = 0
-                content_loss = 0
-                style_loss = 0
-                lpips_loss = 0
+                for eval_name, eval_loader in [("val", val_dataloader), ("train", trainval_dataloader)]:
 
-                # forward pass and evaluation for entire validation set
-                for sample_val in val_dataloader:
+                    loss_total_eval_l1 = 0
+                    loss_total_eval_l2 = 0
+                    content_loss = 0
+                    style_loss = 0
+                    lpips_loss = 0
 
-                    sample_val = to_device(sample_val, self.device)
+                    Path(f'runs/{self.config.experiment}/fid/real').mkdir(exist_ok=True, parents=True)
+                    Path(f'runs/{self.config.experiment}/fid/fake').mkdir(exist_ok=True, parents=True)
 
-                    with torch.no_grad():
-                        prediction = self.model(sample_val["x"], sample_val["graph_data"])
-                        prediction = prediction[:sample_val["y"].shape[0], :]
+                    # forward pass and evaluation for entire validation set
+                    for sample_eval in eval_loader:
 
-                    mask = self.valset.mask(sample_val["y"], self.config.batch_size)
-                    loss_total_val_l1 += (l1_criterion.calculate_loss(prediction, sample_val["y"]).mean(dim=1) * mask).mean().item()
-                    loss_total_val_l2 += (l2_criterion.calculate_loss(prediction, sample_val["y"]).mean(dim=1) * mask).mean().item()
-                    prediction_as_image = self.valset.to_image((prediction * mask.unsqueeze(-1)), sample_val["graph_data"]["level_masks"][0])
-                    target_as_image = self.valset.to_image((sample_val["y"] * mask.unsqueeze(-1)), sample_val["graph_data"]["level_masks"][0])
+                        sample_eval = to_device(sample_eval, self.device)
 
-                    with torch.no_grad():
-                        lpips_loss += loss_fn_alex(target_as_image * 2, prediction_as_image * 2).mean().cpu().item()
+                        with torch.no_grad():
+                            prediction = self.model(sample_eval["x"], sample_eval["graph_data"])
+                            prediction = prediction[:sample_eval["y"].shape[0], :]
 
-                        loss_maps_content = feature_loss_helper.calculate_feature_loss(target_as_image, prediction_as_image)
-                        content_loss = loss_maps_content[0].mean().item() * content_weights[0]
-                        for loss_map_idx in range(1, len(loss_maps_content)):
-                            content_loss += loss_maps_content[loss_map_idx].mean().item() * content_weights[loss_map_idx]
+                        mask = self.valset.mask(sample_eval["y"], self.config.batch_size)
+                        loss_total_eval_l1 += (l1_criterion.calculate_loss(prediction, sample_eval["y"]).mean(dim=1) * mask).mean().item()
+                        loss_total_eval_l2 += (l2_criterion.calculate_loss(prediction, sample_eval["y"]).mean(dim=1) * mask).mean().item()
+                        prediction_as_image = self.valset.to_image((prediction * mask.unsqueeze(-1)), sample_eval["graph_data"]["level_masks"][0])
+                        target_as_image = self.valset.to_image((sample_eval["y"] * mask.unsqueeze(-1)), sample_eval["graph_data"]["level_masks"][0])
 
-                        loss_maps_style = feature_loss_helper.calculate_style_loss(target_as_image, prediction_as_image)
-                        style_loss = loss_maps_style[0].mean().item() * style_weights[0]
-                        for loss_map_idx in range(1, len(loss_maps_style)):
-                            style_loss += loss_maps_style[loss_map_idx].mean().item() * style_weights[loss_map_idx]
+                        for bi in range(sample_eval["graph_data"]["level_masks"][0].max() + 1):
+                            Image.fromarray(((prediction_as_image[bi].permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'runs/{self.config.experiment}/fid/fake/pred_{sample_eval["name"][bi]}.png')
+                            Image.fromarray(((target_as_image[bi].permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)).save(f'runs/{self.config.experiment}/fid/real/tgt_{sample_eval["name"][bi]}.png')
 
-                for loss_name, loss_var in [("loss_val_l1", loss_total_val_l1), ("loss_val_l2", loss_total_val_l2),
-                                            ("loss_val_style", style_loss * 1e3), ("loss_val_content", content_loss), ("lpips_loss", lpips_loss)]:
-                    print(f'[{epoch:03d}] {loss_name}: {loss_var / len(val_dataloader):.5f}')
-                    self.logger.log({loss_name: loss_var / len(val_dataloader), 'iter': epoch * len(train_dataloader), 'epoch': epoch})
+                        with torch.no_grad():
+                            lpips_loss += loss_fn_alex(target_as_image * 2, prediction_as_image * 2).mean().cpu().item()
+
+                            loss_maps_content = feature_loss_helper.calculate_feature_loss(target_as_image, prediction_as_image)
+                            content_loss = loss_maps_content[0].mean().item() * content_weights[0]
+                            for loss_map_idx in range(1, len(loss_maps_content)):
+                                content_loss += loss_maps_content[loss_map_idx].mean().item() * content_weights[loss_map_idx]
+
+                            loss_maps_style = feature_loss_helper.calculate_style_loss(target_as_image, prediction_as_image)
+                            style_loss = loss_maps_style[0].mean().item() * style_weights[0]
+                            for loss_map_idx in range(1, len(loss_maps_style)):
+                                style_loss += loss_maps_style[loss_map_idx].mean().item() * style_weights[loss_map_idx]
+
+                    fid_score = fid.compute_fid(f'runs/{self.config.experiment}/fid/real', f'runs/{self.config.experiment}/fid/fake', mode="clean")
+                    kid_score = fid.compute_kid(f'runs/{self.config.experiment}/fid/real', f'runs/{self.config.experiment}/fid/fake', mode="clean")
+                    shutil.rmtree(f'runs/{self.config.experiment}/fid')
+
+                    for loss_name, loss_var in [(f"loss_{eval_name}_l1", loss_total_eval_l1), (f"loss_{eval_name}_l2", loss_total_eval_l2),
+                                                (f"loss_{eval_name}_style", style_loss * 1e3), (f"loss_{eval_name}_content", content_loss), (f"lpips_{eval_name}", lpips_loss)]:
+                        print(f'[{epoch:03d}] {loss_name}: {loss_var / len(eval_loader):.5f}')
+                        self.logger.log({loss_name: loss_var / len(eval_loader), 'iter': epoch * len(train_dataloader), 'epoch': epoch})
+
+                    print(f'[{epoch:03d}] fid_{eval_name}: {fid_score:.3f}')
+                    print(f'[{epoch:03d}] kid_{eval_name}: {kid_score:.5f}')
+                    self.logger.log({f"fid_{eval_name}": fid_score, 'iter': epoch * len(train_dataloader), 'epoch': epoch})
+                    self.logger.log({f"kid_{eval_name}": kid_score, 'iter': epoch * len(train_dataloader), 'epoch': epoch})
 
                 if epoch % self.config.save_epoch == (self.config.save_epoch - 1):
                     torch.save(self.model.state_dict(), f'runs/{self.config.experiment}/model_{epoch}.ckpt')
@@ -233,6 +258,7 @@ class GraphNetTrainer:
                         self.valvisset.visualize_graph_with_predictions(sample_val['name'][bi], pred_masked.cpu().numpy(), f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}', 'pred')
                         self.valvisset.visualize_graph_with_predictions(sample_val['name'][bi], input_masked.cpu().numpy(), f'runs/{self.config.experiment}/visualization/epoch_{epoch:05d}', 'in')
 
+                print(f"Time take for val & vis: {time.time() - val_t0:.3f}")
                 # set model back to train
                 self.model.train()
 
