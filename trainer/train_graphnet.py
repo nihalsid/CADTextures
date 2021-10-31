@@ -110,7 +110,7 @@ class GraphNetTrainer:
         trainval_dataloader = GraphDataLoader(self.trainvalset, self.config.batch_size, shuffle=False, num_workers=0)
 
         for epoch in range(self.config.max_epoch):
-            pbar = tqdm(list(enumerate(train_dataloader)), desc=f'Epoch {epoch:03d}')
+            pbar = enumerate(tqdm(train_dataloader, desc=f'Epoch {epoch:03d}'))
             for batch_idx, batch in pbar:
                 sample = batch
                 # move batch to device
