@@ -12,7 +12,7 @@ from util.regression_loss import RegressionLossHelper
 import lpips
 
 
-path = "/cluster_HDD/gondor/ysiddiqui/CADTextures/runs/22101737_graphnn_plain_attention_quad_25_0.10_1200/all_vis_model_44.ckpt"
+path = "/cluster_HDD/gondor/ysiddiqui/CADTextures/runs/31102358_graphnn_cube_attn_aug/visualization/epoch_00299"
 
 
 def calculate_metrics():
@@ -63,10 +63,10 @@ def visualize_results():
     export_ctr = 0
     image_list = []
     plane_suffix = "_000_000"
-    cube_suffix = "_135_180"
-    prefix = Path(path).parent.name
+    cube_suffix = "_180_045"
+    prefix = Path(path).parents[1].name
     for item in items:
-        image = (np.array(Image.open(Path(path, f"pred_{item}{plane_suffix}.png"))) * mask).astype(np.uint8)
+        image = (np.array(Image.open(Path(path, f"in_{item}{cube_suffix}.png"))) * mask).astype(np.uint8)
         image_list.append(image)
         if len(image_list) == 16:
             Image.fromarray(np.concatenate(image_list, axis=1)).save(f"/home/nihalsid/{prefix}_{export_ctr:03d}.jpg")
@@ -76,5 +76,5 @@ def visualize_results():
 
 
 if __name__ == "__main__":
-    calculate_metrics()
+    # calculate_metrics()
     visualize_results()
