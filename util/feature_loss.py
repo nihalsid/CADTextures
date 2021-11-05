@@ -4,7 +4,7 @@ import torch
 
 class FeatureLossHelper:
 
-    def __init__(self, layers_content, layers_style, mode):
+    def __init__(self, layers_content, layers_style, content_weight=None, style_weight=None, mode='rgb'):
         super().__init__()
         model_vgg19 = vgg19(pretrained=True)
         model_vgg19.eval()
@@ -17,6 +17,12 @@ class FeatureLossHelper:
             self.calculate_feature_loss = self.calculate_feature_loss_rgb
         else:
             raise NotImplementedError
+        if content_weight is None:
+            content_weight = [1] * len(layers_content)
+        if style_weight is None:
+            style_weight = [1] * len(layers_style)
+        self.content_weight = content_weight
+        self.style_weight = style_weight
 
     def move_to_device(self, device):
         self.feature_extractor.to(device)
@@ -49,6 +55,19 @@ class FeatureLossHelper:
             gram_s = gram(features_target[m].detach())
             error_maps.append(self.criterion(gram_y, gram_s))
         return error_maps
+
+    def calculate_perceptual_losses(self, target_rendered, pred_rendered):
+        loss_maps_content = self.calculate_feature_loss(target_rendered, pred_rendered)
+        loss_content = loss_maps_content[0].mean() * self.content_weight[0]
+        for loss_map_idx in range(1, len(loss_maps_content)):
+            loss_content += loss_maps_content[loss_map_idx].mean() * self.content_weight[loss_map_idx]
+
+        loss_maps_style = self.calculate_style_loss(target_rendered, pred_rendered)
+        loss_style = loss_maps_style[0].mean() * self.style_weight[0]
+        for loss_map_idx in range(1, len(loss_maps_style)):
+            loss_style += loss_maps_style[loss_map_idx].mean() * self.style_weight[loss_map_idx]
+
+        return loss_content, loss_style
 
 
 class GramMatrix(torch.nn.Module):

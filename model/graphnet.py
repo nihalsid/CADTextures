@@ -717,6 +717,7 @@ class BigFaceEncoderDecoder(nn.Module):
         self.down_4_block_0 = FResNetBlock(nf * 2, nf * 4, conv_layer, norm, self.activation)
         self.down_4_block_1 = FResNetBlock(nf * 4, nf * 4, conv_layer, norm, self.activation)
         self.down_4_attn_block_0 = self.down_4_attn_block_1 = lambda x, b: x
+
         if self.use_self_attn:
             self.down_4_attn_block_0 = GAttnBlock(nf * 4, norm)
             self.down_4_attn_block_1 = GAttnBlock(nf * 4, norm)

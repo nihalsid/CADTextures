@@ -3,6 +3,6 @@ name: 'SingleShape/CubeTexturesForGraphQuad'
 single_view: True
 data_dir: 'data'
 splits_dir: 'overfit_050'
-memory: True
+memory: False
 plane: False
 num_pools: 4

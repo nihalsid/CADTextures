@@ -132,3 +132,8 @@ def register_debug_signal_handlers(sig=signal.SIGUSR1, handler=print_traceback_h
 def register_quit_signal_handlers(sig=signal.SIGUSR2, handler=quit_handler):
     print(f'Setting signal {sig} handler {handler}')
     signal.signal(sig, handler)
+
+
+def get_tensor_as_image(t_img):
+    img_data = ((t_img.permute((1, 2, 0)).cpu().numpy() + 0.5) * 255).astype(np.uint8)
+    return Image.fromarray(img_data)

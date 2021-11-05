@@ -11,6 +11,7 @@ from torch_geometric.data import Data, Dataset
 from tqdm import tqdm
 from collections.abc import Mapping, Sequence
 
+from model.differentiable_renderer import transform_pos, intrinsic_to_projection
 from util.mesh_proc import mesh_proc
 from util.misc import read_list, DotDict
 
@@ -37,16 +38,18 @@ class GraphMeshDataset(Dataset):
         self.use_all_views = use_all_views
         item_list = read_list(splits_file)
         self.plane_dataset = config.dataset.plane
+        split_name = config.dataset.name.split('/')
+        self.mesh_directory = Path(config.dataset.data_dir, split_name[0] + '-model', split_name[1])
         if not config.dataset.plane:
+            self.view_list = [[x, y] for x in range(225, 60, -45) for y in range(0, 360, 45)]
             if use_single_view:
                 self.items = [(item, 180, 45) for item in item_list]
             else:
-                self.items = [(item, x, y) for item in item_list for x in range(225, 60, -45) for y in range(0, 360, 45)]
+                self.items = [(item, x, y) for item in item_list for x, y in self.view_list]
             self.target_name = "model_normalized.obj"
             self.input_name = lambda x, y: f"model_normalized_input_{x:03d}_{y:03d}.obj"
             self.mask = lambda x, bs: torch.ones((x.shape[0],)).float().to(x.device)
-            split_name = config.dataset.name.split('/')
-            mesh = trimesh.load(Path(config.dataset.data_dir, split_name[0] + '-model', split_name[1]) / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
+            mesh = trimesh.load(self.mesh_directory / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
             vertex_to_uv = np.array(mesh.visual.uv)
             self.indices_dest_i = []
             self.indices_dest_j = []
@@ -59,10 +62,11 @@ class GraphMeshDataset(Dataset):
                 self.indices_src.append(v_idx)
             self.to_image = self.mesh_to_image
         else:
+            self.view_list = [[x, 0] for x in range(12)]
             if use_single_view:
                 self.items = [(item, 0, 0) for item in item_list]
             else:
-                self.items = [(item, x, 0) for item in item_list for x in range(12)]
+                self.items = [(item, x, y) for item in item_list for x, y in self.view_list]
             self.target_name = "surface_texture.obj"
             self.input_name = lambda x, y: f"inv_partial_texture_{x:03d}.obj"
             mesh = trimesh.load(Path(config.dataset.data_dir, config.dataset.name) / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
@@ -72,6 +76,7 @@ class GraphMeshDataset(Dataset):
             self.to_image = self.plane_to_image
         self.items = [x for i, x in enumerate(self.items) if i % config.n_proc == config.proc]
         super().__init__(Path(config.dataset.data_dir, config.dataset.name))
+        self.projection_matrix = intrinsic_to_projection(np.load(self.camera_file(self.items[0]))['cam_intrinsic']).float()
         self.memory = []
         self.load_to_memory = False
         if load_to_memory:
@@ -86,6 +91,9 @@ class GraphMeshDataset(Dataset):
     @property
     def raw_dir(self) -> str:
         return self.root
+
+    def camera_file(self, item):
+        return Path(self.root) / item[0] / "render" / f"camera_{item[1]:03d}_{item[2]:03d}.npz"
 
     @property
     def processed_dir(self) -> str:
@@ -143,10 +151,19 @@ class GraphMeshDataset(Dataset):
             selected_item = random.choice(indexed_items)
         data = torch.load(os.path.join(self.processed_dir, f'{self.item_to_name(selected_item)}.pt'))
         level_masks = [torch.zeros(shape).long() for shape in [data.x.shape[0]] + data.num_sub_vertices.numpy().tolist()]
+        mesh = trimesh.load(self.mesh_directory / selected_item[0] / self.target_name, process=False)
+        world2cam = torch.from_numpy(np.linalg.inv(np.load(self.camera_file(selected_item))['cam_extrinsic'])).float()
+        vertices = transform_pos(torch.from_numpy(mesh.vertices).float(), self.projection_matrix, world2cam)
+        indices = torch.from_numpy(mesh.faces).int()
+        tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
         return {
             "name": data.name,
             "x": data.x,
             "y": data.y,
+            "vertices": vertices,
+            "indices_quad": indices,
+            "indices": tri_indices,
+            "ranges": torch.tensor([0, tri_indices.shape[0]]).int(),
             "graph_data": self.get_item_as_graphdata(data.edge_index, data.sub_edges, data.num_sub_vertices, data.pool_maps, level_masks)
         }
 
@@ -217,18 +234,20 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         splits_file = Path(config.dataset.data_dir) / 'splits' / config.dataset.name / config.dataset.splits_dir / f'{split}.txt'
         self.split_name = f'{config.dataset.splits_dir}_{split}'
         self.use_all_views = use_all_views
+        split_name = config.dataset.name.split('/')
+        self.mesh_directory = Path(config.dataset.data_dir, split_name[0] + '-model', split_name[1])
         item_list = read_list(splits_file)
         self.plane_dataset = config.dataset.plane
         if not config.dataset.plane:
+            self.view_list = [[x, y] for x in range(225, 60, -45) for y in range(0, 360, 45)]
             if use_single_view:
                 self.items = [(item, 180, 45) for item in item_list]
             else:
-                self.items = [(item, x, y) for item in item_list for x in range(225, 60, -45) for y in range(0, 360, 45)]
+                self.items = [(item, x, y) for item in item_list for x, y in self.view_list]
             self.target_name = "model_normalized.obj"
             self.input_name = lambda x, y: f"model_normalized_input_{x:03d}_{y:03d}.obj"
             self.mask = lambda x, bs: torch.ones((x.shape[0],)).float().to(x.device)
-            split_name = config.dataset.name.split('/')
-            mesh = trimesh.load(Path(config.dataset.data_dir, split_name[0] + '-model', split_name[1]) / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
+            mesh = trimesh.load(self.mesh_directory / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
             vertex_to_uv = np.array(mesh.visual.uv)
             faces_to_vertices = np.array(mesh.faces)
             a = vertex_to_uv[faces_to_vertices[:, 0], :]
@@ -246,10 +265,11 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
                 self.indices_dest_j.append(j)
                 self.indices_src.append(v_idx)
         else:
+            self.view_list = [[x, 0] for x in range(12)]
             if use_single_view:
                 self.items = [(item, 0, 0) for item in item_list]
             else:
-                self.items = [(item, x, 0) for item in item_list for x in range(12)]
+                self.items = [(item, x, y) for item in item_list for x, y in self.view_list]
             self.target_name = "surface_texture.obj"
             self.input_name = lambda x, y: f"inv_partial_texture_{x:03d}.obj"
             mesh = trimesh.load(Path(config.dataset.data_dir, config.dataset.name) / "coloredbrodatz_D48_COLORED" / self.target_name, process=False)
@@ -268,6 +288,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
                     self.indices_src.append(sort_indices[sort_index_i])
                     sort_index_i += 1
         self.items = [x for i, x in enumerate(self.items) if i % config.n_proc == config.proc]
+        self.projection_matrix = intrinsic_to_projection(np.load(self.camera_file(self.items[0]))['cam_intrinsic']).float()
         self.memory = []
         self.load_to_memory = False
         if load_to_memory:
@@ -282,6 +303,9 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
     @property
     def processed_dir(self) -> str:
         return str(Path(self.raw_dir).parent / f'{Path(self.raw_dir).name}_FC_processed')
+
+    def camera_file(self, item):
+        return self.raw_dir / item[0] / "render" / f"camera_{item[1]:03d}_{item[2]:03d}.npz"
 
     def __len__(self):
         if self.use_all_views:
@@ -299,15 +323,18 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         if self.use_all_views:
             if self.plane_dataset:
                 selected_item = self.items[idx]
+                selected_view = random.choice(self.view_list)
             else:
                 unique_items = sorted(list(set([x[0] for x in self.items])))
                 xy = [x[1:] for x in self.items if x[0] == unique_items[0]][::4]
                 new_item_list = [(item, x[0], x[1]) for item in unique_items for x in xy]
                 selected_item = new_item_list[idx]
+                selected_view = random.choice(self.view_list)
         else:
             unique_items = list(set([x[0] for x in self.items]))
             indexed_items = [x for x in self.items if x[0] == unique_items[idx]]
             selected_item = random.choice(indexed_items)
+            selected_view = random.choice(self.view_list)
         pt_arxiv = torch.load(os.path.join(self.processed_dir, f'{self.item_to_name(selected_item)}.pt'))
         if self.plane_dataset:
             x_feat = torch.cat((pt_arxiv['input_positions'], pt_arxiv['input_colors'], pt_arxiv['valid_input_colors'].reshape(-1, 1)), 1).float()
@@ -321,10 +348,20 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         pool_maps = pt_arxiv['pool_locations']
         is_pad = [pt_arxiv['conv_data'][i][4].bool() for i in range(len(pt_arxiv['conv_data']))]
         level_masks = [torch.zeros(pt_arxiv['conv_data'][i][0].shape[0]).long() for i in range(len(pt_arxiv['conv_data']))]
+
+        mesh = trimesh.load(self.mesh_directory / selected_item[0] / self.target_name, process=False)
+        world2cam = torch.from_numpy(np.linalg.inv(np.load(self.camera_file([selected_item[0]] + selected_view))['cam_extrinsic'])).float()
+        vertices = transform_pos(torch.from_numpy(mesh.vertices).float(), self.projection_matrix, world2cam)
+        indices = torch.from_numpy(mesh.faces).int()
+        tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
         return {
             "name": f"{self.item_to_name(selected_item)}",
             "x": x_feat,
             "y": pt_arxiv['target_colors'].float(),
+            "vertices": vertices,
+            "indices_quad": indices,
+            "indices": tri_indices,
+            "ranges": torch.tensor([0, tri_indices.shape[0]]).int(),
             "graph_data": self.get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, is_pad, level_masks)
         }
 
@@ -493,8 +530,21 @@ class Collater(object):
         elif isinstance(elem, Mapping):
             retdict = {}
             for key in elem:
-                if key in ['x', 'y']:
+                if key in ['x', 'y', 'vertices']:
                     retdict[key] = self.cat_collate([d[key] for d in batch])
+                elif key in ['indices_quad', 'indices']:
+                    num_vertex = 0
+                    indices = []
+                    for b_i in range(len(batch)):
+                        indices.append(batch[b_i][key] + num_vertex)
+                        num_vertex += batch[b_i]['vertices'].shape[0]
+                    retdict[key] = self.cat_collate(indices)
+                elif key == 'ranges':
+                    start_index = 0
+                    for b_i in range(len(batch)):
+                        batch[b_i][key] = torch.tensor([start_index, batch[b_i]['indices'].shape[0]]).int()
+                        start_index += batch[b_i]['indices'].shape[0]
+                    retdict[key] = self.collate([d[key] for d in batch])
                 else:
                     retdict[key] = self.collate([d[key] for d in batch])
             return retdict
