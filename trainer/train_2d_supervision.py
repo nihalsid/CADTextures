@@ -2,7 +2,6 @@ import shutil
 from pathlib import Path
 
 import hydra
-import lpips
 import pytorch_lightning as pl
 import torch
 import torch_scatter
@@ -36,7 +35,6 @@ class Supervise2DTrainer(pl.LightningModule):
         self.render_helper = None
         self.l1_criterion = RegressionLossHelper('l1')
         self.l2_criterion = RegressionLossHelper('l2')
-        self.loss_fn_alex = lpips.LPIPS(net='alex')
         self.feature_loss_helper = FeatureLossHelper(['relu1_2', 'relu2_2', 'relu3_3', 'relu4_3'], ['relu1_2', 'relu2_2', 'relu3_3', 'relu4_3'],
                                                      [1 / 8, 1 / 4, 1 / 2, 1], [1 / 32, 1 / 16, 1 / 8, 1 / 4])
 
@@ -75,7 +73,7 @@ class Supervise2DTrainer(pl.LightningModule):
         face_color_pred, rendered_color_pred, rendered_color_gt = self.forward(batch, return_face_colors=True)
         loss_l1 = self.l1_criterion.calculate_loss(rendered_color_gt, rendered_color_pred).mean()
         loss_content, loss_style = self.feature_loss_helper.calculate_perceptual_losses(rendered_color_gt, rendered_color_pred)
-        loss_lpips = self.loss_fn_alex(rendered_color_gt * 2, rendered_color_pred * 2).mean()
+        loss_lpips = self.feature_loss_helper.model_alex(rendered_color_gt * 2, rendered_color_pred * 2).mean()
         self.log(f"{phase}/loss_l1", loss_l1, on_step=False, on_epoch=True, prog_bar=False, logger=True, add_dataloader_idx=False)
         self.log(f"{phase}/loss_content", loss_content, on_step=False, on_epoch=True, prog_bar=False, logger=True, add_dataloader_idx=False)
         self.log(f"{phase}/loss_style", loss_style, on_step=False, on_epoch=True, prog_bar=False, logger=True, add_dataloader_idx=False)
@@ -161,13 +159,13 @@ class Supervise2DTrainer(pl.LightningModule):
         if self.render_helper is None:
             self.render_helper = DifferentiableRenderer(224)
         self.feature_loss_helper.move_to_device(self.device)
-        self.loss_fn_alex.to(self.device)
+        self.feature_loss_helper.model_alex.to(self.device)
 
     def on_validation_start(self):
         if self.render_helper is None:
             self.render_helper = DifferentiableRenderer(224)
         self.feature_loss_helper.move_to_device(self.device)
-        self.loss_fn_alex.to(self.device)
+        self.feature_loss_helper.model_alex.to(self.device)
 
 
 def to_vertex_colors_scatter(face_colors, batch):

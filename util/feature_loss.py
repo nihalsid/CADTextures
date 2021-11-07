@@ -1,4 +1,5 @@
 from torchvision.models import vgg19
+import lpips
 import torch
 
 
@@ -7,6 +8,7 @@ class FeatureLossHelper:
     def __init__(self, layers_content, layers_style, content_weight=None, style_weight=None, mode='rgb'):
         super().__init__()
         model_vgg19 = vgg19(pretrained=True)
+        self.model_alex = lpips.LPIPS(net='alex')
         model_vgg19.eval()
         self.layers_content = layers_content
         self.layers_style = layers_style
