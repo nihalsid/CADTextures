@@ -17,6 +17,7 @@ from util.create_trainer import create_trainer
 from util.feature_loss import FeatureLossHelper
 from util.misc import get_tensor_as_image
 from util.regression_loss import RegressionLossHelper
+from apex.optimizers import FusedAdam
 
 
 class Supervise2DTrainer(pl.LightningModule):
@@ -26,12 +27,13 @@ class Supervise2DTrainer(pl.LightningModule):
         self.save_hyperparameters(config)
         self.config = config
         self.model = self.get_model()
+        self.to_vertex_colors = to_vertex_colors_stub if config.method == 'graph' else to_vertex_colors_scatter
         DatasetCls = self.get_dataset_class()
         self.trainset = DatasetCls(config, 'train', use_single_view=config.dataset.single_view, load_to_memory=config.dataset.memory)
         self.valset = DatasetCls(config, 'val', use_single_view=config.dataset.single_view)
         self.trainvalset = DatasetCls(config, 'train_val', use_single_view=config.dataset.single_view)
         self.valvisset = DatasetCls(config, 'val_vis', use_single_view=True)
-        self.render_helper = DifferentiableRenderer(224)
+        self.render_helper = None
         self.l1_criterion = RegressionLossHelper('l1')
         self.l2_criterion = RegressionLossHelper('l2')
         self.loss_fn_alex = lpips.LPIPS(net='alex')
@@ -39,7 +41,7 @@ class Supervise2DTrainer(pl.LightningModule):
                                                      [1 / 8, 1 / 4, 1 / 2, 1], [1 / 32, 1 / 16, 1 / 8, 1 / 4])
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.lr, weight_decay=self.config.weight_decay)
+        optimizer = FusedAdam(self.model.parameters(), lr=self.config.lr, weight_decay=self.config.weight_decay)
         scheduler = []
         if self.config.scheduler is not None:
             scheduler = [torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=self.config.scheduler, gamma=0.5)]
@@ -48,8 +50,8 @@ class Supervise2DTrainer(pl.LightningModule):
     def forward(self, batch, return_face_colors=False):
         pred_face_colors = self.model(batch["x"], batch["graph_data"])
         tgt_face_colors = batch["y"]
-        rendered_color_pred = self.render_helper.render(batch['vertices'], batch['indices'], to_vertex_colors(pred_face_colors, batch), batch["ranges"].cpu())
-        rendered_color_gt = self.render_helper.render(batch['vertices'], batch['indices'], to_vertex_colors(tgt_face_colors, batch), batch["ranges"].cpu())
+        rendered_color_pred = self.render_helper.render(batch['vertices'], batch['indices'], self.to_vertex_colors(pred_face_colors, batch), batch["ranges"].cpu())
+        rendered_color_gt = self.render_helper.render(batch['vertices'], batch['indices'], self.to_vertex_colors(tgt_face_colors, batch), batch["ranges"].cpu())
         if return_face_colors:
             return pred_face_colors, rendered_color_pred.permute((0, 3, 1, 2)), rendered_color_gt.permute((0, 3, 1, 2))
         return rendered_color_pred.permute((0, 3, 1, 2)), rendered_color_gt.permute((0, 3, 1, 2))
@@ -68,7 +70,7 @@ class Supervise2DTrainer(pl.LightningModule):
         export_func = [self.handle_fid_export, self.handle_fid_export, self.handle_vis_export][dataloader_idx]
         rendered_color_in = self.render_helper.render(batch['vertices'],
                                                       batch['indices'],
-                                                      to_vertex_colors(batch["x"][:, 3:6], batch),
+                                                      self.to_vertex_colors(batch["x"][:, 3:6], batch),
                                                       batch["ranges"].cpu()).permute((0, 3, 1, 2))
         face_color_pred, rendered_color_pred, rendered_color_gt = self.forward(batch, return_face_colors=True)
         loss_l1 = self.l1_criterion.calculate_loss(rendered_color_gt, rendered_color_pred).mean()
@@ -156,17 +158,25 @@ class Supervise2DTrainer(pl.LightningModule):
         return model
 
     def on_train_start(self):
+        if self.render_helper is None:
+            self.render_helper = DifferentiableRenderer(224)
         self.feature_loss_helper.move_to_device(self.device)
         self.loss_fn_alex.to(self.device)
 
     def on_validation_start(self):
+        if self.render_helper is None:
+            self.render_helper = DifferentiableRenderer(224)
         self.feature_loss_helper.move_to_device(self.device)
         self.loss_fn_alex.to(self.device)
 
 
-def to_vertex_colors(face_colors, batch):
+def to_vertex_colors_scatter(face_colors, batch):
     vertex_colors = torch.zeros((batch["vertices"].shape[0], face_colors.shape[1])).to(face_colors.device)
     torch_scatter.scatter_mean(face_colors.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 3), batch["indices_quad"].reshape(-1).long(), dim=0, out=vertex_colors)
+    return vertex_colors
+
+
+def to_vertex_colors_stub(vertex_colors, batch):
     return vertex_colors
 
 
