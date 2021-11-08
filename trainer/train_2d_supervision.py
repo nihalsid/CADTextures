@@ -204,8 +204,8 @@ def to_vertex_colors_scatter(face_colors, batch):
     return vertex_colors[batch['vertex_ctr'], :]
 
 
-def to_vertex_colors_stub(vertex_colors, _batch):
-    return vertex_colors
+def to_vertex_colors_stub(vertex_colors, batch):
+    return vertex_colors[batch['vertex_ctr'], :]
 
 
 @hydra.main(config_path='../config', config_name='supervise_2d')
