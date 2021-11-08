@@ -10,6 +10,12 @@ def transform_pos(pos, projection_matrix, world_to_cam_matrix):
     return torch.matmul(posw, t_mtx.t())
 
 
+def transform_pos_mvp(pos, mvp):
+    # (x,y,z) -> (x,y,z,1)
+    posw = torch.cat([pos, torch.ones([pos.shape[0], 1]).to(pos.device)], axis=1)
+    return torch.bmm(posw.unsqueeze(0).expand(mvp.shape[0], -1, -1), mvp.permute((0, 2, 1))).reshape((-1, 4))
+
+
 def render(glctx, pos_clip, pos_idx, vtx_col, col_idx, resolution, ranges):
     rast_out, _ = dr.rasterize(glctx, pos_clip, pos_idx, resolution=[resolution, resolution], ranges=ranges)
     color, _ = dr.interpolate(vtx_col[None, ...], rast_out, col_idx)

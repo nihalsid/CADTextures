@@ -5,6 +5,7 @@ import hydra
 import pytorch_lightning as pl
 import torch
 import torch_scatter
+from tabulate import tabulate
 from cleanfid import fid
 from pytorch_lightning.utilities import rank_zero_only
 from torch_geometric.nn import GraphNorm, BatchNorm
@@ -65,19 +66,27 @@ class Supervise2DTrainer(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx, dataloader_idx):
         phase = ["val", "train", "vis"][dataloader_idx]
-        export_func = [self.handle_fid_export, self.handle_fid_export, self.handle_vis_export][dataloader_idx]
+        export_func = [self.handle_fid_export_texture, self.handle_fid_export_texture, self.handle_vis_export][dataloader_idx]
         rendered_color_in = self.render_helper.render(batch['vertices'],
                                                       batch['indices'],
-                                                      self.to_vertex_colors(batch["x"][:, 3:6], batch),
+                                                      self.to_vertex_colors(batch["x"][:, 3:6], batch).contiguous(),
                                                       batch["ranges"].cpu()).permute((0, 3, 1, 2))
         face_color_pred, rendered_color_pred, rendered_color_gt = self.forward(batch, return_face_colors=True)
-        loss_l1 = self.l1_criterion.calculate_loss(rendered_color_gt, rendered_color_pred).mean()
+        loss_l1_view = self.l1_criterion.calculate_loss(rendered_color_gt, rendered_color_pred).mean()
+        loss_lpips_view = self.feature_loss_helper.model_alex(rendered_color_gt * 2, rendered_color_pred * 2).mean()
         loss_content, loss_style = self.feature_loss_helper.calculate_perceptual_losses(rendered_color_gt, rendered_color_pred)
-        loss_lpips = self.feature_loss_helper.model_alex(rendered_color_gt * 2, rendered_color_pred * 2).mean()
-        self.log(f"{phase}/loss_l1", loss_l1, on_step=False, on_epoch=True, prog_bar=False, logger=True, add_dataloader_idx=False)
+
+        # for now calculate losses in texture space (so we can compare with 3d scenario
+        # todo: eventually phase these out
+        mask = self.valset.mask(batch["y"], self.config.batch_size).unsqueeze(-1)
+        loss_l1_tex = (self.l1_criterion.calculate_loss(face_color_pred, batch["y"]).mean(dim=1) * mask).mean().item()
+        prediction_as_image, target_as_image, input_as_image = self.get_pred_batch_as_texture(face_color_pred, batch)
+        loss_lpips_tex = self.feature_loss_helper.model_alex(target_as_image * 2, prediction_as_image * 2).mean()
+
+        self.log(f"{phase}/loss_l1", loss_l1_tex, on_step=False, on_epoch=True, prog_bar=False, logger=True, add_dataloader_idx=False)
         self.log(f"{phase}/loss_content", loss_content, on_step=False, on_epoch=True, prog_bar=False, logger=True, add_dataloader_idx=False)
         self.log(f"{phase}/loss_style", loss_style, on_step=False, on_epoch=True, prog_bar=False, logger=True, add_dataloader_idx=False)
-        self.log(f"{phase}/loss_lpips", loss_lpips, on_step=False, on_epoch=True, prog_bar=False, logger=True, add_dataloader_idx=False)
+        self.log(f"{phase}/loss_lpips", loss_lpips_tex, on_step=False, on_epoch=True, prog_bar=False, logger=True, add_dataloader_idx=False)
         export_func(face_color_pred, batch, rendered_color_in, rendered_color_gt, rendered_color_pred, batch['name'], phase)
 
     @rank_zero_only
@@ -90,6 +99,11 @@ class Supervise2DTrainer(pl.LightningModule):
             self.log(f"{phase}/loss_fid", fid_score, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True, add_dataloader_idx=False)
             self.log(f"{phase}/loss_kid", kid_score, on_step=False, on_epoch=True, prog_bar=False, logger=True, rank_zero_only=True, add_dataloader_idx=False)
         shutil.rmtree(f'runs/{self.config.experiment}/fid')
+        cm = self.trainer.callback_metrics
+        table_data = [["split", "l1", "lpips", "kid", "fid"],
+                      ["train", cm["train/loss_l1"], cm["train/loss_lpips"], cm["train/loss_kid"], cm["train/loss_fid"]],
+                      ["val", cm["val/loss_l1"], cm["val/loss_lpips"], cm["val/loss_kid"], cm["val/loss_fid"]]]
+        print(tabulate(table_data, headers='firstrow', tablefmt='psql', floatfmt=".4f"))
 
     # ======= Utility Methods =======
 
@@ -103,32 +117,48 @@ class Supervise2DTrainer(pl.LightningModule):
             GraphDataLoader(self.valvisset, self.config.batch_size, shuffle=False, num_workers=0),
         ]
 
+    def get_pred_batch_as_texture(self, face_color_pred, batch):
+        mask = self.valset.mask(batch["y"], self.config.batch_size).unsqueeze(-1)
+        input_as_image = self.valset.to_image((batch["x"][:, 3:6] * mask), batch["graph_data"]["level_masks"][0])
+        prediction_as_image = self.valset.to_image((face_color_pred * mask), batch["graph_data"]["level_masks"][0])
+        target_as_image = self.valset.to_image((batch["y"] * mask), batch["graph_data"]["level_masks"][0])
+        return prediction_as_image, target_as_image, input_as_image
+
     def handle_vis_export(self, face_color_pred, batch, rendered_color_in, rendered_color_gt, rendered_color_pred, names, _phase):
         output_dir_view = Path(f'runs/{self.config.experiment}/visualization/epoch_{self.current_epoch:04d}/view')
         output_dir_tex = Path(f'runs/{self.config.experiment}/visualization/epoch_{self.current_epoch:04d}/texture')
         output_dir_view.mkdir(exist_ok=True, parents=True)
         output_dir_tex.mkdir(exist_ok=True, parents=True)
-        mask = self.valset.mask(batch["y"], self.config.batch_size).unsqueeze(-1)
-        input_as_image = self.valset.to_image((batch["x"][:, 3:6] * mask), batch["graph_data"]["level_masks"][0])
-        prediction_as_image = self.valset.to_image((face_color_pred * mask), batch["graph_data"]["level_masks"][0])
-        target_as_image = self.valset.to_image((batch["y"] * mask), batch["graph_data"]["level_masks"][0])
+        prediction_as_image, target_as_image, input_as_image = self.get_pred_batch_as_texture(face_color_pred, batch)
         for bi in range(rendered_color_gt.shape[0]):
-            get_tensor_as_image(rendered_color_in[bi]).save(output_dir_view / f'in_{names[bi]}.png')
-            get_tensor_as_image(rendered_color_gt[bi]).save(output_dir_view / f'tgt_{names[bi]}.png')
-            get_tensor_as_image(rendered_color_pred[bi]).save(output_dir_view / f'pred_{names[bi]}.png')
+            get_tensor_as_image(rendered_color_in[bi]).save(output_dir_view / f'in_{names[bi // batch["mvp"].shape[1]]}_{bi % batch["mvp"].shape[1]}.png')
+            get_tensor_as_image(rendered_color_gt[bi]).save(output_dir_view / f'tgt_{names[bi // batch["mvp"].shape[1]]}_{bi % batch["mvp"].shape[1]}.png')
+            get_tensor_as_image(rendered_color_pred[bi]).save(output_dir_view / f'pred_{names[bi // batch["mvp"].shape[1]]}_{bi % batch["mvp"].shape[1]}.png')
+        for bi in range(target_as_image.shape[0]):
             get_tensor_as_image(input_as_image[bi]).save(output_dir_tex / f'in_{names[bi]}.png')
             get_tensor_as_image(target_as_image[bi]).save(output_dir_tex / f'tgt_{names[bi]}.png')
             get_tensor_as_image(prediction_as_image[bi]).save(output_dir_tex / f'pred_{names[bi]}.png')
 
-    def handle_fid_export(self, _face_colors, _batch, _rendered_color_in, rendered_color_gt, rendered_color_pred, names, phase):
+    def handle_fid_export_view(self, _face_colors, batch, _rendered_color_in, rendered_color_gt, rendered_color_pred, names, phase):
         # create images for fid & kid
         path_real = Path(f'runs/{self.config.experiment}/fid/{phase}/real')
         path_fake = Path(f'runs/{self.config.experiment}/fid/{phase}/fake')
         path_real.mkdir(exist_ok=True, parents=True)
         path_fake.mkdir(exist_ok=True, parents=True)
         for bi in range(rendered_color_gt.shape[0]):
-            get_tensor_as_image(rendered_color_gt[bi]).save(path_real / f'tgt_{names[bi]}.png')
-            get_tensor_as_image(rendered_color_pred[bi]).save(path_fake / f'pred_{names[bi]}.png')
+            get_tensor_as_image(rendered_color_gt[bi]).save(path_real / f'tgt_{names[bi // batch["mvp"].shape[1]]}_{bi % batch["mvp"].shape[1]}.png')
+            get_tensor_as_image(rendered_color_pred[bi]).save(path_fake / f'pred_{names[bi // batch["mvp"].shape[1]]}_{bi % batch["mvp"].shape[1]}.png')
+
+    def handle_fid_export_texture(self, face_color_pred, batch, _rendered_color_in, _rendered_color_gt, _rendered_color_pred, names, phase):
+        # create images for fid & kid
+        path_real = Path(f'runs/{self.config.experiment}/fid/{phase}/real')
+        path_fake = Path(f'runs/{self.config.experiment}/fid/{phase}/fake')
+        path_real.mkdir(exist_ok=True, parents=True)
+        path_fake.mkdir(exist_ok=True, parents=True)
+        prediction_as_image, target_as_image, _ = self.get_pred_batch_as_texture(face_color_pred, batch)
+        for bi in range(target_as_image.shape[0]):
+            get_tensor_as_image(target_as_image[bi]).save(path_real / f'tgt_{names[bi]}.png')
+            get_tensor_as_image(prediction_as_image[bi]).save(path_fake / f'pred_{names[bi]}.png')
 
     def get_dataset_class(self):
         return GraphMeshDataset if self.config.method == 'graph' else FaceGraphMeshDataset
@@ -169,12 +199,12 @@ class Supervise2DTrainer(pl.LightningModule):
 
 
 def to_vertex_colors_scatter(face_colors, batch):
-    vertex_colors = torch.zeros((batch["vertices"].shape[0], face_colors.shape[1])).to(face_colors.device)
+    vertex_colors = torch.zeros((batch["vertices"].shape[0] // batch["mvp"].shape[1], face_colors.shape[1])).to(face_colors.device)
     torch_scatter.scatter_mean(face_colors.unsqueeze(1).expand(-1, 4, -1).reshape(-1, 3), batch["indices_quad"].reshape(-1).long(), dim=0, out=vertex_colors)
-    return vertex_colors
+    return vertex_colors[batch['vertex_ctr'], :]
 
 
-def to_vertex_colors_stub(vertex_colors, batch):
+def to_vertex_colors_stub(vertex_colors, _batch):
     return vertex_colors
 
 

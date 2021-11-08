@@ -1,3 +1,4 @@
+import math
 import os
 import random
 from pathlib import Path
@@ -10,8 +11,9 @@ from torch.utils.data.dataloader import default_collate
 from torch_geometric.data import Data, Dataset
 from tqdm import tqdm
 from collections.abc import Mapping, Sequence
+from scipy.spatial.transform import Rotation
 
-from model.differentiable_renderer import transform_pos, intrinsic_to_projection
+from model.differentiable_renderer import transform_pos, intrinsic_to_projection, transform_pos_mvp
 from util.mesh_proc import mesh_proc
 from util.misc import read_list, DotDict
 
@@ -39,6 +41,7 @@ class GraphMeshDataset(Dataset):
         item_list = read_list(splits_file)
         self.plane_dataset = config.dataset.plane
         split_name = config.dataset.name.split('/')
+        self.views_per_sample = config.views_per_sample
         self.mesh_directory = Path(config.dataset.data_dir, split_name[0] + '-model', split_name[1])
         if not config.dataset.plane:
             self.view_list = [[x, y] for x in range(225, 60, -45) for y in range(0, 360, 45)]
@@ -152,14 +155,18 @@ class GraphMeshDataset(Dataset):
         data = torch.load(os.path.join(self.processed_dir, f'{self.item_to_name(selected_item)}.pt'))
         level_masks = [torch.zeros(shape).long() for shape in [data.x.shape[0]] + data.num_sub_vertices.numpy().tolist()]
         mesh = trimesh.load(self.mesh_directory / selected_item[0] / self.target_name, process=False)
-        world2cam = torch.from_numpy(np.linalg.inv(np.load(self.camera_file(selected_item))['cam_extrinsic'])).float()
-        vertices = transform_pos(torch.from_numpy(mesh.vertices).float(), self.projection_matrix, world2cam)
+        mvp = torch.stack([torch.matmul(self.projection_matrix, torch.from_numpy(np.linalg.inv(generate_random_camera((mesh.bounds[0] + mesh.bounds[1]) / 2))).float())
+                           for _ in range(self.views_per_sample)], dim=0)
+        vertices = torch.from_numpy(mesh.vertices).float()
         indices = torch.from_numpy(mesh.faces).int()
         tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
+        vctr = torch.tensor(list(range(vertices.shape[0]))).long()
         return {
             "name": data.name,
             "x": data.x,
             "y": data.y,
+            "vertex_ctr": vctr,
+            "mvp": mvp,
             "vertices": vertices,
             "indices_quad": indices,
             "indices": tri_indices,
@@ -227,6 +234,19 @@ class GraphMeshDataset(Dataset):
         return t[graph_data['level_masks'][level] == idx]
 
 
+def generate_random_camera(loc):
+    x_angles, y_angles = list(range(90, 270, 5)), list(range(0, 360, 5))
+    weight_fn = lambda x: 0.5 + 0.125 * math.cos(2 * (math.pi / 45) * x)
+    weights_x, weights_y = [weight_fn(x) for x in x_angles], [weight_fn(y) for y in y_angles]
+    x_angle, y_angle = random.choices(x_angles, weights_x, k=1)[0], random.choices(y_angles, weights_y, k=1)[0]
+    camera_pose = np.eye(4)
+    camera_pose[:3, :3] = Rotation.from_euler('y', y_angle, degrees=True).as_matrix() @ Rotation.from_euler('z', 180, degrees=True).as_matrix() @ Rotation.from_euler('x', x_angle, degrees=True).as_matrix()
+    # camera_translation = camera_pose[:3, :3] @ np.array([0, 0, 1.025]) + loc
+    camera_translation = camera_pose[:3, :3] @ np.array([0, 0, 1.925]) + loc
+    camera_pose[:3, 3] = camera_translation
+    return camera_pose
+
+
 class FaceGraphMeshDataset(torch.utils.data.Dataset):
 
     def __init__(self, config, split, use_single_view, load_to_memory=False, use_all_views=False):
@@ -237,6 +257,7 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         split_name = config.dataset.name.split('/')
         self.mesh_directory = Path(config.dataset.data_dir, split_name[0] + '-model', split_name[1])
         item_list = read_list(splits_file)
+        self.views_per_sample = config.views_per_sample
         self.plane_dataset = config.dataset.plane
         if not config.dataset.plane:
             self.view_list = [[x, y] for x in range(225, 60, -45) for y in range(0, 360, 45)]
@@ -323,18 +344,15 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         if self.use_all_views:
             if self.plane_dataset:
                 selected_item = self.items[idx]
-                selected_view = random.choice(self.view_list)
             else:
                 unique_items = sorted(list(set([x[0] for x in self.items])))
                 xy = [x[1:] for x in self.items if x[0] == unique_items[0]][::4]
                 new_item_list = [(item, x[0], x[1]) for item in unique_items for x in xy]
                 selected_item = new_item_list[idx]
-                selected_view = random.choice(self.view_list)
         else:
             unique_items = list(set([x[0] for x in self.items]))
             indexed_items = [x for x in self.items if x[0] == unique_items[idx]]
             selected_item = random.choice(indexed_items)
-            selected_view = random.choice(self.view_list)
         pt_arxiv = torch.load(os.path.join(self.processed_dir, f'{self.item_to_name(selected_item)}.pt'))
         if self.plane_dataset:
             x_feat = torch.cat((pt_arxiv['input_positions'], pt_arxiv['input_colors'], pt_arxiv['valid_input_colors'].reshape(-1, 1)), 1).float()
@@ -350,16 +368,20 @@ class FaceGraphMeshDataset(torch.utils.data.Dataset):
         level_masks = [torch.zeros(pt_arxiv['conv_data'][i][0].shape[0]).long() for i in range(len(pt_arxiv['conv_data']))]
 
         mesh = trimesh.load(self.mesh_directory / selected_item[0] / self.target_name, process=False)
-        world2cam = torch.from_numpy(np.linalg.inv(np.load(self.camera_file([selected_item[0]] + selected_view))['cam_extrinsic'])).float()
-        vertices = transform_pos(torch.from_numpy(mesh.vertices).float(), self.projection_matrix, world2cam)
+        mvp = torch.stack([torch.matmul(self.projection_matrix, torch.from_numpy(np.linalg.inv(generate_random_camera((mesh.bounds[0] + mesh.bounds[1]) / 2))).float())
+                           for _ in range(self.views_per_sample)], dim=0)
+        vertices = torch.from_numpy(mesh.vertices).float()
         indices = torch.from_numpy(mesh.faces).int()
         tri_indices = torch.cat([indices[:, [0, 1, 2]], indices[:, [0, 2, 3]]], 0)
+        vctr = torch.tensor(list(range(vertices.shape[0]))).long()
         return {
             "name": f"{self.item_to_name(selected_item)}",
             "x": x_feat,
             "y": pt_arxiv['target_colors'].float(),
+            "vertex_ctr": vctr,
             "vertices": vertices,
             "indices_quad": indices,
+            "mvp": mvp,
             "indices": tri_indices,
             "ranges": torch.tensor([0, tri_indices.shape[0]]).int(),
             "graph_data": self.get_item_as_graphdata(edge_index, sub_edges, pad_sizes, num_sub_vertices, pool_maps, is_pad, level_masks)
@@ -530,21 +552,41 @@ class Collater(object):
         elif isinstance(elem, Mapping):
             retdict = {}
             for key in elem:
-                if key in ['x', 'y', 'vertices']:
+                if key in ['x', 'y']:
                     retdict[key] = self.cat_collate([d[key] for d in batch])
-                elif key in ['indices_quad', 'indices']:
+                elif key == 'vertices':
+                    retdict[key] = self.cat_collate([transform_pos_mvp(d['vertices'], d['mvp']) for d in batch])
+                elif key == 'indices':
                     num_vertex = 0
                     indices = []
                     for b_i in range(len(batch)):
-                        indices.append(batch[b_i][key] + num_vertex)
-                        num_vertex += batch[b_i]['vertices'].shape[0]
+                        for view_i in range(batch[b_i]['mvp'].shape[0]):
+                            indices.append(batch[b_i][key] + num_vertex)
+                            num_vertex += batch[b_i]['vertices'].shape[0]
                     retdict[key] = self.cat_collate(indices)
+                elif key == 'indices_quad':
+                    num_vertex = 0
+                    indices_quad = []
+                    for b_i in range(len(batch)):
+                        indices_quad.append(batch[b_i][key] + num_vertex)
+                        num_vertex += batch[b_i]['vertices'].shape[0]
+                    retdict[key] = self.cat_collate(indices_quad)
                 elif key == 'ranges':
+                    ranges = []
                     start_index = 0
                     for b_i in range(len(batch)):
-                        batch[b_i][key] = torch.tensor([start_index, batch[b_i]['indices'].shape[0]]).int()
-                        start_index += batch[b_i]['indices'].shape[0]
-                    retdict[key] = self.collate([d[key] for d in batch])
+                        for view_i in range(batch[b_i]['mvp'].shape[0]):
+                            ranges.append(torch.tensor([start_index, batch[b_i]['indices'].shape[0]]).int())
+                            start_index += batch[b_i]['indices'].shape[0]
+                    retdict[key] = self.collate(ranges)
+                elif key == 'vertex_ctr':
+                    vertex_counts = []
+                    num_vertex = 0
+                    for b_i in range(len(batch)):
+                        for view_i in range(batch[b_i]['mvp'].shape[0]):
+                            vertex_counts.append(batch[b_i]['vertex_ctr'] + num_vertex)
+                        num_vertex += batch[b_i]['vertices'].shape[0]
+                    retdict[key] = self.cat_collate(vertex_counts)
                 else:
                     retdict[key] = self.collate([d[key] for d in batch])
             return retdict
