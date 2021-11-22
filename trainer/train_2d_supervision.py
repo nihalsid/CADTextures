@@ -40,7 +40,7 @@ class Supervise2DTrainer(pl.LightningModule):
                                                      [1 / 8, 1 / 4, 1 / 2, 1], [1 / 32, 1 / 16, 1 / 8, 1 / 4])
 
     def configure_optimizers(self):
-        optimizer = FusedAdam(self.model.parameters(), lr=self.config.lr, weight_decay=self.config.weight_decay)
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.lr, weight_decay=self.config.weight_decay)
         scheduler = []
         if self.config.scheduler is not None:
             scheduler = [torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=self.config.scheduler, gamma=0.5)]
