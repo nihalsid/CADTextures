@@ -1,0 +1,3 @@
+[submodule "external/chamfer_distance"]
+	path = external/chamfer_distance
+	url = git@github.com:ThibaultGROUEIX/ChamferDistancePytorch.git

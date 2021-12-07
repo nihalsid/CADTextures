@@ -23,17 +23,25 @@ DEPTH = 6
 
 def manifold_meshes(input_folder, target_folder, process_id, total_procs):
     target_folder.mkdir(exist_ok=True, parents=True)
-    meshes = sorted([(x / "models" / "model_normalized.obj") for x in input_folder.iterdir() if (x / "models" / "model_normalized.obj").exists()], key=lambda x: x.name)
-    # meshes = sorted([(x / "model_normalized.obj") for x in input_folder.iterdir() if (x / "model_normalized.obj").exists()], key=lambda x: x.name)
+    # meshes = sorted([(x / "models" / "model_normalized.obj") for x in input_folder.iterdir() if (x / "models" / "model_normalized.obj").exists()], key=lambda x: x.name)
+    meshes_duplicated = sorted([(x / "model_normalized.obj") for x in input_folder.iterdir() if (x / "model_normalized.obj").exists()], key=lambda x: x.name)
+    shapes = []
+    meshes = []
+    for m in meshes_duplicated:
+        shape = m.parent.name.split('_')[0]
+        if shape not in shapes:
+            shapes.append(shape)
+            meshes.append(m)
     meshes = [x for i, x in enumerate(meshes) if i % total_procs == process_id]
     logger.info(f'Proc {process_id + 1}/{total_procs} processing {len(meshes)}')
     for mesh in tqdm(meshes):
-        (target_folder / mesh.parents[1].name).mkdir(exist_ok=True)
-        # (target_folder / mesh.parents[0].name).mkdir(exist_ok=True)
+        # (target_folder / mesh.parents[1].name).mkdir(exist_ok=True)
+        (target_folder / mesh.parents[0].name).mkdir(exist_ok=True)
         dirname = os.path.dirname(os.path.realpath(__file__))
-        os.system(f"{dirname}/manifold/manifold --input {mesh} --output {target_folder / mesh.parents[1].name / 'model_normalized.obj'} --depth {DEPTH}")
+        os.system(f"{dirname}/manifold/manifold --input {mesh} --output {target_folder / mesh.parents[0].name / 'model_normalized.obj'} --depth {DEPTH}")
         # for obj in [o for o in mesh.parent.iterdir() if o.name.endswith('.obj')]:
         #     os.system(f"cp {obj} {target_folder / mesh.parents[0].name / obj.name}")
+        # break
 
 
 if __name__ == "__main__":

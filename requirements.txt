@@ -40,3 +40,6 @@ yaml
 hydra
 lpips
 einops
+nvdiffrast
+apex
+chamferdist

@@ -69,8 +69,8 @@ def quadface_8_neighbors(mesh):
     mod4 = lambda x: x % 4
     mod8 = lambda x: x % 8
     face_neighbors = [[-1 for _1 in range(8)] for _0 in range(mesh.faces.shape[0])]
-    edge_faces = defaultdict(list)
-    vertex_faces = [set() for _ in range(mesh.vertices.shape[0])]
+    edge_faces = defaultdict(list)  # faces surrounding an edge
+    vertex_faces = [set() for _ in range(mesh.vertices.shape[0])]  # faces sharing this vertex
 
     for f_idx in range(mesh.faces.shape[0]):
         v_ = mesh.faces[f_idx]
@@ -93,7 +93,10 @@ def quadface_8_neighbors(mesh):
             cur_v_faces = set(vertex_faces[v_[mod4(_i + 1)]])
             to_remove = {f_idx, face_neighbors[f_idx][mod8(2 * _i)], face_neighbors[f_idx][mod8(2 * _i + 2)]}
             cur_v_faces = cur_v_faces - to_remove
-            assert len(cur_v_faces) <= 1
+            # assert len(cur_v_faces) <= 1
+            # more than 4 faces can share a vertex
+            if len(cur_v_faces) > 1:
+                cur_v_faces = {list(cur_v_faces)[0]}
             if len(cur_v_faces) == 1:
                 face_neighbors[f_idx][mod8(2 * _i + 1)] = cur_v_faces.pop()
 

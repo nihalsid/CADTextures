@@ -60,6 +60,7 @@ def add_camera(xyz=(0, 0, 0), fov=1.0, name=None, proj_model='PERSP', sensor_fit
 
     return cam
 
+
 def setup_render_all():
     global normal_file_output
     global silhoutte_file_output

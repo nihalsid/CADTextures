@@ -9,7 +9,7 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=yawar.siddiqui@tum.de
 ##SBATCH --exclude=char,pegasus,tarsonis,gondor,moria,seti,sorona,umoja,lothlann,balrog,daidalos,gimli,himring,hithlum
-#SBATCH --exclude=char,pegasus,tarsonis,daidalos,himring,hithlum
+#SBATCH --exclude=char,pegasus,tarsonis,gondor,moria,seti,sorona,umoja,lothlann
 #SBATCH --partition=debug
 #SBATCH --qos=normal
 
