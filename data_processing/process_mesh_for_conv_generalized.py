@@ -40,10 +40,10 @@ def get_selections(mesh_dir):
 def calculate_face_hierarchies(mesh_dir):
     selections = get_selections(mesh_dir)[0]
     face_N_R = OrderedDict({
-        (6144, 1536): [96, 80, 64],
-        (1536, 384): [64, 48, 40, 32],
+        (6144, 1536): [96, 88, 80, 72, 64],
+        (1536, 384): [64, 56, 48, 40, 32],
         (384, 96): [32, 24, 16],
-        (96, 24): [16, 12],
+        (96, 24): [16, 8],
         (24, 1): [1],
     })
     pool_down_pairs = list(face_N_R.keys())

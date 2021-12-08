@@ -35,7 +35,7 @@ def quadriflow_executor(*args):
         failure_lr = subprocess.call(f'{"./quadriflow"} {args[0][1]}', shell=True)
         if failure_lr != 0:
             print("Retrying...")
-            new_args = " ".join(args[0][1].split(" ")[2:])
+            new_args = " ".join(args[0][1].split(" ")[1:])
             failure_lr = subprocess.call(f'{"./quadriflow"} {new_args}', shell=True)
             if failure_lr != 0:
                 raise Exception(f"error code {failure_lr} for {new_args}")
@@ -142,7 +142,7 @@ if __name__ == '__main__':
     files = sorted([x for x in Path(args.input_folder).iterdir()])
     files = [x for i, x in enumerate(files) if i % args.num_proc == args.proc]
 
-    # files = check_existence(files)
+    files = check_existence(files)
 
     for f in tqdm(files):
         quadriflow_wrapper(f)

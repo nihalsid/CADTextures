@@ -4,7 +4,7 @@
 ##SBATCH --nodes=1
 ##SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=12G
+#SBATCH --mem=48gb
 ##SBATCH --exclude=char,pegasus,seti,tarsonis
 
 cd /rhome/ysiddiqui/CADTextures
