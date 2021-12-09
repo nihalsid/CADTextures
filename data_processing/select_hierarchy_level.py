@@ -79,6 +79,28 @@ def get_less_faces(root_files):
     return less
 
 
+def unexpected_bound_meshes():
+    import math
+
+    unexpected = []
+    for f in tqdm(files):
+        selections = json.loads((f / "selection.json").read_text())
+        selection_keys = sorted(list(selections.keys()), key=lambda x: int(x), reverse=True)
+        qmeshes = [f"quad_{int(k):05d}_{selections[k]:03d}.obj" for k in selection_keys]
+        for idx, qmesh in enumerate(qmeshes):
+            scale_tol = 0.1 + 0.425 * ((idx + 1) / len(qmeshes))
+            mesh = trimesh.load(f / qmesh, process=False)
+            center = (mesh.bounds[0] + mesh.bounds[1]) / 2
+            scale = (mesh.bounds[1] - mesh.bounds[0]).max()
+            for v0, v1, tol in zip([center[0], center[1], center[2], scale], [0., 0., 0., 1], [0.125, 0.125, 0.125, scale_tol]):
+                if not math.isclose(v0, v1, abs_tol=tol):
+                    print(f / qmesh, v0, v1, tol)
+                    unexpected.append(f / qmesh)
+                    break
+
+    print("Unexpected: ", len(unexpected))
+
+
 if __name__ == '__main__':
     from tqdm import tqdm
     import argparse
@@ -106,3 +128,5 @@ if __name__ == '__main__':
 
     for f in tqdm(less):
         pad_faces(f)
+
+    unexpected_bound_meshes()
