@@ -3,9 +3,9 @@
 #SBATCH --job-name graphdata
 ##SBATCH --nodes=1
 ##SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=24gb
-#SBATCH --exclude=char,tarsonis,pegasus
+##SBATCH --exclude=char,tarsonis,pegasus
 
 cd /rhome/ysiddiqui/CADTextures
 

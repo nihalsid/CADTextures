@@ -12,6 +12,8 @@ def select_hierarchy_level(path):
         1536: [[64, 56, 48, 40, 32], 72],
         6144: [[96, 88, 80, 72, 64], 128]
     }
+    if (path / "selection.json").exists():
+        return
     num_samples = 50000
     chamfer = ChamferDistance()
     choosen_face_res = {}
@@ -27,7 +29,6 @@ def select_hierarchy_level(path):
 
                 current_mesh = trimesh.load(path / f"quad_{face_num:05d}_{res_to_check:03d}.obj", process=False)
                 samples_cur = torch.from_numpy(trimesh.sample.sample_surface_even(current_mesh, num_samples)[0]).unsqueeze(0).cuda().float()
-
                 cd = chamfer(samples_cur, samples_ref).item()
                 if cd < best_cd:
                     choosen_res = res_to_check
@@ -101,6 +102,7 @@ if __name__ == '__main__':
         copy_to_meshdir(f, destination_folder)
 
     less = get_less_faces(files)
+    print("LessFaces: ", len(less))
 
     for f in tqdm(less):
         pad_faces(f)

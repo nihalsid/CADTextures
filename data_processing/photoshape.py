@@ -142,9 +142,9 @@ if __name__ == '__main__':
     files = sorted([x for x in Path(args.input_folder).iterdir()])
     files = [x for i, x in enumerate(files) if i % args.num_proc == args.proc]
 
-    files = check_existence(files)
+    non_existent_files = check_existence(files)
 
-    for f in tqdm(files):
+    for f in tqdm(non_existent_files):
         quadriflow_wrapper(f)
 
     nan_meshes = check_for_nans(files)
