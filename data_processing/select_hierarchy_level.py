@@ -121,12 +121,14 @@ if __name__ == '__main__':
     for f in tqdm(files):
         select_hierarchy_level(f)
         make_cube_24(f)
-        copy_to_meshdir(f, destination_folder)
 
     less = get_less_faces(files)
     print("LessFaces: ", len(less))
 
     for f in tqdm(less):
         pad_faces(f)
+
+    for f in tqdm(files):
+        copy_to_meshdir(f, destination_folder)
 
     unexpected_bound_meshes()
