@@ -5,7 +5,7 @@
 ##SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32gb
-#SBATCH --partition=debug
+#SBATCH --partition=submit
 #SBATCH --qos=normal
 
 cd /rhome/ysiddiqui/CADTextures/data_processing

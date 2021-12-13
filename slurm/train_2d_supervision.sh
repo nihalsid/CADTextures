@@ -10,7 +10,7 @@
 #SBATCH --mail-user=yawar.siddiqui@tum.de
 ##SBATCH --exclude=char,pegasus,tarsonis,gondor,moria,seti,sorona,umoja,lothlann,balrog,daidalos,gimli,himring,hithlum
 #SBATCH --exclude=char,pegasus,tarsonis,gondor,moria,seti,sorona,umoja,lothlann
-#SBATCH --partition=debug
+#SBATCH --partition=submit
 #SBATCH --qos=normal
 
 source /usr/local/Modules/init/bash
