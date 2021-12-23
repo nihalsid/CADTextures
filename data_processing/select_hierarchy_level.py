@@ -2,6 +2,7 @@ from pathlib import Path
 import trimesh
 import torch
 import json
+from tqdm import tqdm
 
 
 def select_hierarchy_level(path):
@@ -79,8 +80,9 @@ def get_less_faces(root_files):
     return less
 
 
-def unexpected_bound_meshes():
+def unexpected_bound_meshes(files):
     import math
+    import numpy as np
 
     unexpected = []
     for f in tqdm(files):
@@ -90,6 +92,10 @@ def unexpected_bound_meshes():
         for idx, qmesh in enumerate(qmeshes):
             scale_tol = 0.1 + 0.425 * ((idx + 1) / len(qmeshes))
             mesh = trimesh.load(f / qmesh, process=False)
+            mean_faces = mesh.triangles.mean(1)
+            mean_face_norm = np.linalg.norm(mean_faces, axis=1)
+            less_than_1 = mean_face_norm <= 1
+            mesh.update_faces(less_than_1)
             center = (mesh.bounds[0] + mesh.bounds[1]) / 2
             scale = (mesh.bounds[1] - mesh.bounds[0]).max()
             for v0, v1, tol in zip([center[0], center[1], center[2], scale], [0., 0., 0., 1], [0.125, 0.125, 0.125, scale_tol]):
@@ -102,7 +108,6 @@ def unexpected_bound_meshes():
 
 
 if __name__ == '__main__':
-    from tqdm import tqdm
     import argparse
 
     parser = argparse.ArgumentParser()
@@ -131,4 +136,4 @@ if __name__ == '__main__':
     for f in tqdm(files):
         copy_to_meshdir(f, destination_folder)
 
-    unexpected_bound_meshes()
+    unexpected_bound_meshes(files)

@@ -9,4 +9,4 @@
 #SBATCH --qos=normal
 
 cd /rhome/ysiddiqui/CADTextures/data_processing
-python photoshape.py -i /cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/shapenet-chairs-manifold/ --num_proc $SLURM_ARRAY_TASK_COUNT --proc $SLURM_ARRAY_TASK_ID
+python photoshape_fullres.py -i /cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/shapenet-chairs-manifold/ --num_proc $SLURM_ARRAY_TASK_COUNT --proc $SLURM_ARRAY_TASK_ID
