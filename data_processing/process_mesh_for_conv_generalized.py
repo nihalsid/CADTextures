@@ -8,6 +8,7 @@ import trimesh
 import numpy as np
 from tqdm import tqdm
 
+from data_processing.add_mesh_features import laplace_weights, fundamental_forms, calculate_curvature
 from data_processing.process_mesh_for_conv import quadface_8_neighbors, cartesian_ordering, append_self_face
 
 
@@ -97,9 +98,24 @@ def process_mesh(mesh_input_directory, output_processed_directory):
         face_neighbors = append_self_face(face_neighbors)
         conv_data.append((face_neighbors, vertices, faces, is_pad_vertex, is_pad_face))
     pool_locations = calculate_face_hierarchies(mesh_input_directory)
+    face_centers = np.array(mesh.triangles.mean(axis=1))
+    neighborhood = np.array(conv_data[0][0])[:, 1:]
+    vflist = [x.split(' ')[0] for x in mesh_paths[0].read_text().splitlines() if x.split(' ')[0] in ['v', 'f', '']]
+    num_pads = 0
+    if '' in vflist:
+        blankpos = len(vflist) - 1 - vflist[::-1].index('')
+        num_pads = vflist[blankpos + 1:].index('f')
+    laplacian = laplace_weights(face_centers, neighborhood) * face_centers
+    ff1, ff2 = fundamental_forms(mesh, neighborhood)
+    gcurv, mcurv = calculate_curvature(mesh, num_pads)
     torch.save({
-        "input_positions": torch.from_numpy(mesh.triangles.mean(axis=1)).float(),
+        "input_positions": torch.from_numpy(face_centers).float(),
         "input_normals": torch.from_numpy(np.array(mesh.face_normals)).float(),
+        "input_laplacian": torch.from_numpy(laplacian).float(),
+        "input_ff1": torch.from_numpy(ff1).float(),
+        "input_ff2": torch.from_numpy(ff2).float(),
+        "input_gcurv": torch.from_numpy(gcurv).float(),
+        "input_mcurv": torch.from_numpy(mcurv).float(),
         "target_colors": torch.zeros([mesh.face_normals.shape[0], 3]).float() / 255 - 0.5,
         "pool_locations": [torch.from_numpy(p).long() for p in pool_locations],
         "conv_data": [[torch.from_numpy(np.array(cd[0])).long(), torch.from_numpy(cd[1]).float(),
