@@ -2,6 +2,7 @@ from PIL import Image
 from pathlib import Path
 import numpy as np
 import cv2 as cv
+from tqdm import tqdm
 from skimage import color
 
 
@@ -27,13 +28,15 @@ def concat_masks(path):
     Image.fromarray(mask).save(path / "images" / "mask.png")
 
 
-def dilate_erode_mask(path):
-    mask = np.array(Image.open(path / "images" / "mask.png")).astype(np.uint8)
-    kernel_size = 1
-    element = cv.getStructuringElement(cv.MORPH_ELLIPSE, (2 * kernel_size + 1, 2 * kernel_size + 1), (kernel_size, kernel_size))
-    mask = cv.erode(cv.dilate(mask, element), element)
-    mask = mask > 0
-    Image.fromarray(mask).save(path / "images" / "mask.png")
+def dilate_erode_mask(mask_dir):
+    (mask_dir.parent / f'{mask_dir.name}_eroded').mkdir(exist_ok=True)
+    for mask_path in tqdm(list(mask_dir.iterdir())):
+        mask = np.array(Image.open(mask_path)).astype(np.uint8)
+        kernel_size = 2
+        element = cv.getStructuringElement(cv.MORPH_ELLIPSE, (2 * kernel_size + 1, 2 * kernel_size + 1), (kernel_size, kernel_size))
+        mask = cv.erode(mask, element)
+        mask = mask > 0
+        Image.fromarray(mask).save(mask_dir.parent / f'{mask_dir.name}_eroded' / mask_path.name)
 
 
 def cv_segment(src_path, dst_path):
@@ -54,9 +57,8 @@ def cv_segment(src_path, dst_path):
     Image.fromarray(np.logical_or(mask == cv.GC_PR_FGD, mask == cv.GC_FGD)).save(dst_path)
 
 
-if __name__ == '__main__':
+def create_segmentations():
     import argparse
-    from tqdm import tqdm
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--input_folder', type=str)
@@ -74,3 +76,8 @@ if __name__ == '__main__':
 
     for f in tqdm(files):
         cv_segment(f, output_folder / f.name)
+
+
+if __name__ == '__main__':
+    create_segmentations()
+    # dilate_erode_mask(Path('/cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars_mask'))

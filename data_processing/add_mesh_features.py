@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import trimesh
 from scipy.sparse import coo_matrix
+import json
 
 
 def laplace_weights(face_centers, neighbors, equal_weight=False):
@@ -87,6 +88,37 @@ def add_features(mesh_path, pt_path):
     pt_arxiv['input_ff2'] = torch.from_numpy(ff2).float()
     pt_arxiv['input_gcurv'] = torch.from_numpy(gcurv).float()
     pt_arxiv['input_mcurv'] = torch.from_numpy(mcurv).float()
+    pt_arxiv['vertices'] = torch.from_numpy(mesh.vertices).float()
+    pt_arxiv['indices'] = torch.from_numpy(mesh.faces).int()
+    torch.save(pt_arxiv, pt_path)
+
+
+def add_multilevel_positions(mesh_input_directory, pt_path):
+
+    def get_selections(mesh_dir):
+        selections = json.loads((mesh_dir / "selection.json").read_text())
+        selections = {int(k): v for k, v in selections.items()}
+        selections[24] = 1
+        faces = sorted(list(selections.keys()), key=lambda x: int(x), reverse=True)
+        qmeshes = [mesh_dir / f"quad_{int(f):05d}_{selections[f]:03d}.obj" for f in faces]
+        return selections, qmeshes
+
+    pt_arxiv = torch.load(pt_path)
+    mesh_paths = get_selections(mesh_input_directory)[1]
+    position_data = []
+    for dec_path in mesh_paths:
+        mesh = trimesh.load(dec_path, process=False)
+        position_data.append(torch.from_numpy(np.array(mesh.triangles.mean(axis=1))).float())
+
+    pt_arxiv['pos_data'] = position_data
+    torch.save(pt_arxiv, pt_path)
+
+
+def add_vertices_indices(mesh_path, pt_path):
+    mesh = trimesh.load(mesh_path, process=False)
+    pt_arxiv = torch.load(pt_path)
+    pt_arxiv['vertices'] = torch.from_numpy(mesh.vertices).float()
+    pt_arxiv['indices'] = torch.from_numpy(mesh.faces).int()
     torch.save(pt_arxiv, pt_path)
 
 
@@ -96,16 +128,18 @@ if __name__ == '__main__':
     from tqdm import tqdm
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-i', '--input_folder', type=str)
     parser.add_argument('-n', '--num_proc', default=1, type=int)
     parser.add_argument('-p', '--proc', default=0, type=int)
 
     mesh_root = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres")
-    pt_root = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres_processed/")
+    pt_root = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres-part_processed/")
+    data_root = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/shapenet-chairs-manifold-highres")
 
     args = parser.parse_args()
     files = sorted([x for x in pt_root.iterdir()])
     files = [x for i, x in enumerate(files) if i % args.num_proc == args.proc]
 
     for pt in tqdm(files):
-        add_features(mesh_root / pt.name.split('.')[0] / "model_normalized.obj", pt)
+        # add_features(mesh_root / pt.name.split('.')[0] / "model_normalized.obj", pt)
+        # add_multilevel_positions(data_root / pt.name.split('.')[0], pt)
+        add_vertices_indices(mesh_root / pt.name.split('.')[0] / "model_normalized.obj", pt)
