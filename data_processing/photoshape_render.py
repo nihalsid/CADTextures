@@ -200,17 +200,24 @@ def expand2square(pil_img, background_color):
     return result
 
 
-def render_with_photoshape_view(mesh, view):
+def render_with_photoshape_view(mesh, view, vc_mode):
     lights = create_raymond_lights()
     width = height = 1000
     spherical_camera = spherical_coord_to_cam(view['fov'], view['azimuth'], view['elevation'])
     camera_pose = np.linalg.inv(spherical_camera.view_mat())
     r = pyrender.OffscreenRenderer(width, height)
     camera = pyrender.PerspectiveCamera(yfov=np.pi * view['fov'] / 180, aspectRatio=1.0, znear=0.001)
-    scene = pyrender.Scene(bg_color=[1.0, 1.0, 1.0, 0.0], ambient_light=[0.75, 0.75, 0.75])
-    for geo in mesh.geometry:
-        geo = pyrender.Mesh.from_trimesh(mesh.geometry[geo])
+    if vc_mode:
+        scene = pyrender.Scene(bg_color=[1.0, 1.0, 1.0, 0.0], ambient_light=[0.5, 0.5, 0.5])
+        geo = pyrender.Mesh.from_trimesh(mesh)
+        geo.primitives[0].material.metallicFactor = 0.6
+        geo.primitives[0].material.roughnessFactor = 0.4
         scene.add(geo)
+    else:
+        scene = pyrender.Scene(bg_color=[1.0, 1.0, 1.0, 0.0], ambient_light=[0.75, 0.75, 0.75])
+        for geo in mesh.geometry:
+            geo = pyrender.Mesh.from_trimesh(mesh.geometry[geo])
+            scene.add(geo)
     for n in lights:
         scene.add_node(n, scene.main_camera_node)
     scene.add(camera, pose=camera_pose)
@@ -224,14 +231,15 @@ def render_with_photoshape_view(mesh, view):
     return color_flat, color, mask
 
 
-def render_with_photoshape_views(proc, num_proc, random_views=False):
+def render_with_photoshape_views(proc, num_proc, vc_mode=False, random_views=False):
     suffix = f'_rand' if random_views else ''
+    prefix = f'vc_' if vc_mode else ''
     pairmeta_path = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/metadata/pairs.json")
     image_path = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars")
     mesh_path = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/shapenet-chairs")
-    output_path_flat = Path(f"/cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars_simulated_nolight{suffix}")
-    output_path_light = Path(f"/cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars_simulated_light{suffix}")
-    output_path_mask = Path(f"/cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars_simulated_mask{suffix}")
+    output_path_flat = Path(f"/cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars_{prefix}simulated_nolight{suffix}")
+    output_path_light = Path(f"/cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars_{prefix}simulated_light{suffix}")
+    output_path_mask = Path(f"/cluster/gimli/ysiddiqui/CADTextures/Photoshape/exemplars_{prefix}simulated_mask{suffix}")
     output_path_flat.mkdir(exist_ok=True)
     output_path_light.mkdir(exist_ok=True)
     output_path_mask.mkdir(exist_ok=True)
@@ -239,18 +247,24 @@ def render_with_photoshape_views(proc, num_proc, random_views=False):
     view_keys = sorted(list(views.keys()))
     view_keys = [x for i, x in enumerate(view_keys) if i % num_proc == proc]
     for v in tqdm(view_keys):
-        if (mesh_path / v / "model_normalized.obj").exists():
-            mesh_geometry = trimesh.load(mesh_path / v / "model_normalized.obj", force='scene', process=False)
+        if (mesh_path / v / "vc_model_normalized.obj").exists():
+            if vc_mode:
+                mesh_geometry = trimesh.load(mesh_path / v / "vc_model_normalized.obj", force='mesh', process=False)
+            else:
+                mesh_geometry = trimesh.load(mesh_path / v / "model_normalized.obj", force='scene', process=False)
             transform_matrix = np.array([[0.0, 0.0, 1.0, 0.0], [0.0, 1.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
             mesh_geometry.apply_transform(transform_matrix)
             bounds = mesh_geometry.bounds
             loc = (bounds[0] + bounds[1]) / 2
             mesh_geometry.apply_translation(-loc)
             mesh_geometry.apply_scale(1 / (bounds[1] - bounds[0]).max())
-            flat, light, mask = render_with_photoshape_view(mesh_geometry, views[v] if not random_views else get_random_views(1)[0])
-            flat.save(output_path_flat / f"{v}.jpg")
-            light.save(output_path_light / f"{v}.jpg")
-            mask.save(output_path_mask / f"{v}.jpg")
+            try:
+                flat, light, mask = render_with_photoshape_view(mesh_geometry, views[v] if not random_views else get_random_views(1)[0], vc_mode)
+                flat.save(output_path_flat / f"{v}.jpg")
+                light.save(output_path_light / f"{v}.jpg")
+                mask.save(output_path_mask / f"{v}.jpg")
+            except Exception as err:
+                print('Failed for', v, err)
         else:
             print(mesh_path / v / "model_normalized.obj", "doesn't exist")
 
@@ -272,6 +286,4 @@ if __name__ == "__main__":
     parser.add_argument('-m', '--mesh_folder', type=str)
 
     args = parser.parse_args()
-    # render_and_export(Path(args.input_folder), args.proc, args.num_proc)
-    # project_and_export(Path(args.input_folder), Path(args.mesh_folder), args.proc, args.num_proc)
-    render_with_photoshape_views(args.proc, args.num_proc, True)
+    render_with_photoshape_views(args.proc, args.num_proc, True, False)

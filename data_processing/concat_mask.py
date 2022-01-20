@@ -40,21 +40,29 @@ def dilate_erode_mask(mask_dir):
 
 
 def cv_segment(src_path, dst_path):
-    image = Image.open(src_path)
-    orig_arr = np.array(image)
-    outlined_arr = np.array(image)
-    outlined_arr[cv.Canny(outlined_arr, 10, 200) > 0, :] = 0
-    lab_orig_arr = color.rgb2lab(orig_arr)
-    sure_fg = lab_orig_arr[:, :, 0] < 95
-    sure_bg = lab_orig_arr[:, :, 0] > 99
-    # Image.fromarray(sure_fg).save(src_path.parent / "fg.png")
-    gc_mask = np.ones((outlined_arr.shape[0], outlined_arr.shape[1]), dtype=np.uint8) * cv.GC_PR_BGD
-    gc_mask[sure_fg] = cv.GC_FGD
-    gc_mask[sure_bg] = cv.GC_BGD
-    fgmodel = np.zeros((1, 65), dtype=np.float)
-    bgmodel = np.zeros((1, 65), dtype=np.float)
-    mask, _, _ = cv.grabCut(outlined_arr, gc_mask, None, bgmodel, fgmodel, iterCount=10, mode=cv.GC_INIT_WITH_MASK)
-    Image.fromarray(np.logical_or(mask == cv.GC_PR_FGD, mask == cv.GC_FGD)).save(dst_path)
+    try:
+        image = Image.open(src_path)
+        orig_arr = np.array(image)
+        outlined_arr = np.array(image)
+        outlined_arr[cv.Canny(outlined_arr, 10, 200) > 0, :] = 0
+        lab_orig_arr = color.rgb2lab(orig_arr)
+        sure_fg = lab_orig_arr[:, :, 0] < 95
+        sure_bg = lab_orig_arr[:, :, 0] > 99
+        gc_mask = np.ones((outlined_arr.shape[0], outlined_arr.shape[1]), dtype=np.uint8) * cv.GC_PR_BGD
+        gc_mask[sure_fg] = cv.GC_FGD
+        gc_mask[sure_bg] = cv.GC_BGD
+        fgmodel = np.zeros((1, 65), dtype=np.float)
+        bgmodel = np.zeros((1, 65), dtype=np.float)
+        mask, _, _ = cv.grabCut(outlined_arr, gc_mask, None, bgmodel, fgmodel, iterCount=10, mode=cv.GC_INIT_WITH_MASK)
+        Image.fromarray(np.logical_or(mask == cv.GC_PR_FGD, mask == cv.GC_FGD)).save(dst_path)
+    except Exception as err:
+        print('Error:', err, src_path)
+
+
+def smooth_mask(src_path, dst_path):
+    image = np.array(Image.open(src_path))
+    blur = cv.blur(image, (21 * 2, 21 * 2))
+    Image.fromarray(blur).save(dst_path)
 
 
 def create_segmentations():
@@ -62,6 +70,7 @@ def create_segmentations():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--input_folder', type=str)
+    parser.add_argument('-m', '--mask_folder', type=str)
     parser.add_argument('-o', '--output_folder', type=str)
     parser.add_argument('-n', '--num_proc', default=1, type=int)
     parser.add_argument('-p', '--proc', default=0, type=int)
@@ -69,13 +78,14 @@ def create_segmentations():
     args = parser.parse_args()
 
     files = sorted([x for x in Path(args.input_folder).iterdir()])
-    files = [x for i, x in enumerate(files) if i % args.num_proc == args.proc]
+    # files = [x for i, x in enumerate(files) if i % args.num_proc == args.proc and x.name == 'shape02317_rank02_pair35114.jpg']
 
     output_folder = Path(args.output_folder)
     output_folder.mkdir(exist_ok=True)
 
     for f in tqdm(files):
         cv_segment(f, output_folder / f.name)
+        # smooth_mask(Path(args.mask_folder) / f.name, Path(args.mask_folder).parent / f'{Path(args.mask_folder).name}_soft' / f.name)
 
 
 if __name__ == '__main__':

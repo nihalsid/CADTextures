@@ -17,6 +17,20 @@ processed_shapes_pruned_path = Path('/cluster/gimli/ysiddiqui/CADTextures/Photos
 shape_meta_path = Path('/cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/metadata/shapes.json')
 
 
+def pool(x, node_count, pool_map, lateral_map, pool_op='max'):
+    if pool_op == 'max':
+        x_pooled = torch.ones((node_count, x.shape[1]), dtype=x.dtype).to(x.device) * (x.min().detach() - 1e-3)
+        torch_scatter.scatter_max(x, pool_map, dim=0, out=x_pooled)
+        x_pooled[lateral_map[:, 0], :] = x_pooled[lateral_map[:, 1], :]
+    elif pool_op == 'mean':
+        x_pooled = torch.zeros((node_count, x.shape[1]), dtype=x.dtype).to(x.device)
+        torch_scatter.scatter_mean(x, pool_map, dim=0, out=x_pooled)
+        x_pooled[lateral_map[:, 0], :] = x_pooled[lateral_map[:, 1], :]
+    else:
+        raise NotImplementedError
+    return x_pooled
+
+
 def merge_annotation_map():
     map_0 = json.loads(Path("/home/nihalsid/Downloads/Chair.train.json").read_text())
     map_1 = json.loads(Path("/home/nihalsid/Downloads/Chair.val.json").read_text())
@@ -175,10 +189,34 @@ def add_semantics():
     map_mesh_faces_to_labels(files)
 
 
+def add_semantic_pools():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-n', '--num_proc', default=1, type=int)
+    parser.add_argument('-p', '--proc', default=0, type=int)
+
+    args = parser.parse_args()
+    files = sorted([x for x in processed_shapes_pruned_path.iterdir()])
+    files = [x for i, x in enumerate(files) if i % args.num_proc == args.proc]
+
+    for f in tqdm(files):
+        pt_arxiv = torch.load(f)
+        num_sub_vertices = [pt_arxiv['conv_data'][i][0].shape[0] for i in range(1, len(pt_arxiv['conv_data']))]
+        pool_maps = pt_arxiv['pool_locations']
+        lateral_maps = pt_arxiv['lateral_maps']
+        semantic_maps = [pt_arxiv['semantics']]
+        x = torch.nn.functional.one_hot(pt_arxiv['semantics'].long(), num_classes=7).float()
+        for level in range(len(num_sub_vertices)):
+            x = pool(x, num_sub_vertices[level], pool_maps[level], lateral_maps[level], pool_op='mean')
+            semantic_maps.append(torch.argmax(x, dim=1))
+        pt_arxiv['semantic_maps'] = semantic_maps
+        torch.save(pt_arxiv, f)
+
+
 if __name__ == "__main__":
     # process_result_json(Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/part-net/annotations/85f4e9037425401a191c3762b497eca9/result_after_merging.json"))
     # normalize_rotate_points(Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/part-net/annotations/85f4e9037425401a191c3762b497eca9"), "test")
     # align_points_to_meshes()
     # add_semantics()
     visualize_random_annotation()
-
+    # add_semantic_pools()
