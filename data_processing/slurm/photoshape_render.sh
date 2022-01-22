@@ -4,7 +4,7 @@
 ##SBATCH --nodes=1
 ##SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
-#SBATCH --gpus=1
+##SBATCH --gpus=1
 #SBATCH --partition=submit
 #SBATCH --qos=normal
 

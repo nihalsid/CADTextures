@@ -157,7 +157,7 @@ def project_and_export(render_path, mesh_path, proc, num_proc):
     logger.info(f'Proc {proc + 1}/{num_proc} processing {len(render_dirs)}')
     for render_directory in tqdm(render_dirs):
         if render_directory.parent.name.split('_')[0] in quad_meshes:
-            mesh_geometry = trimesh.load(quad_meshes[render_directory.parent.name.split('_')[0]], process=True)
+            mesh_geometry = trimesh.load(quad_meshes[render_directory.parent.name.split('_')[0]], process=False)
             flat_render_list = sorted([x for x in render_directory.iterdir() if x.name.startswith('flat_')])
             flat_renders, depths, projection_matrices, camera_poses = [], [], [], []
             for fr in flat_render_list:
@@ -168,7 +168,7 @@ def project_and_export(render_path, mesh_path, proc, num_proc):
                 depths.append(camera['depth'])
                 projection_matrices.append(camera['cam_intrinsic'])
                 camera_poses.append(camera['cam_extrinsic'])
-            create_mesh_from_all_views(mesh_geometry, flat_renders, depths, projection_matrices, camera_poses, render_directory.parent / f"vc_model_normalized.obj")
+            create_mesh_from_all_views(mesh_geometry, flat_renders, depths, projection_matrices, camera_poses, render_directory.parent / f"vcf_model_normalized.obj")
         else:
             print(f"{str(render_directory)} doesn't have a corresponding shape")
 
@@ -286,4 +286,5 @@ if __name__ == "__main__":
     parser.add_argument('-m', '--mesh_folder', type=str)
 
     args = parser.parse_args()
-    render_with_photoshape_views(args.proc, args.num_proc, True, False)
+    # render_with_photoshape_views(args.proc, args.num_proc, True, False)
+    # project_and_export(Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/shapenet-chairs"), Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/shapenet-chairs-manifold-highres"), args.proc, args.num_proc)

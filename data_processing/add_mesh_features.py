@@ -119,6 +119,7 @@ def add_vertices_indices(mesh_path, pt_path):
     pt_arxiv = torch.load(pt_path)
     pt_arxiv['vertices'] = torch.from_numpy(mesh.vertices).float()
     pt_arxiv['indices'] = torch.from_numpy(mesh.faces).int()
+    pt_arxiv['normals'] = torch.from_numpy(np.array(mesh.vertex_normals)).float()
     torch.save(pt_arxiv, pt_path)
 
 
@@ -132,7 +133,7 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--proc', default=0, type=int)
 
     mesh_root = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres")
-    pt_root = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres-part_processed/")
+    pt_root = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape/shapenet-chairs-manifold-highres-part_processed_color/")
     data_root = Path("/cluster/gimli/ysiddiqui/CADTextures/Photoshape-model/shapenet-chairs-manifold-highres")
 
     args = parser.parse_args()
