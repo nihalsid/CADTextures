@@ -83,7 +83,7 @@ def render_with_photoshape_views(proc, num_proc):
             image, depth, camera_k, camera_w = render_with_photoshape_view(mesh, views[random.choice(view_keys)])
             cameras[f"camera_mat_{ctr}"] = camera_k
             cameras[f"world_mat_{ctr}"] = camera_w
-            imageio.imsave(str(output_path / mp.name / "depth" / f"{ctr:03d}.exr"), depth)
+            np.save(str(output_path / mp.name / "depth" / f"{ctr:03d}.npy"), depth)
         np.savez_compressed(str(output_path / mp.name / "depth" / "cameras.npz"), **cameras)
 
 
