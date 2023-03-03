@@ -18,7 +18,7 @@ logger.addHandler(fh)
 logger.addHandler(ch)
 
 
-DEPTH = 6
+DEPTH = 7
 
 
 def manifold_meshes(input_folder, target_folder, process_id, total_procs):
@@ -28,10 +28,9 @@ def manifold_meshes(input_folder, target_folder, process_id, total_procs):
     shapes = []
     meshes = []
     for m in meshes_duplicated:
-        shape = m.parent.name.split('_')[0]
-        if shape not in shapes:
-            shapes.append(shape)
-            meshes.append(m)
+        shape = m.parent.name
+        shapes.append(shape)
+        meshes.append(m)
     meshes = [x for i, x in enumerate(meshes) if i % total_procs == process_id]
     logger.info(f'Proc {process_id + 1}/{total_procs} processing {len(meshes)}')
     for mesh in tqdm(meshes):

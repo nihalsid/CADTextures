@@ -1,6 +1,89 @@
 # CADTextures
 
-Work in progress experiments for CAD texturing project.
+Random experiments for CAD texturing project, also has scripts for texturify data processing.
+
+### Texturify Data Pre-processing
+
+The `data_processing` directory contains the preprocessing scripts for texturify. I've uploaded example shapes here as a tutorial for reference to try it out. Note that you'd need our fork of [trimesh.](https://github.com/nihalsid/trimesh)
+
+#### Folder structure for raw data (i.e. meshes):
+
+```commandline
+data/
+    <DatasetName>/
+        <sample_0_name>/
+            model_normalized.obj
+        <sample_1_name>/
+            model_normalized.obj
+        ...
+```
+
+For this walkthrough we'll use the `data/TestDataset` as an example.
+
+#### 1) Running manifold plus for getting watertight meshes:
+
+This creates the watertight meshes in the TestDatasetOutput directory.
+
+```
+python data_processing/manifold_mesh.py -i data/TestDataset/ -o data/TestDatasetOutput/
+```
+
+#### 2) Create hierarchy of scanned shapes with sdf-gen
+
+Clone and build sdf-gen:
+```
+git clone git@github.com:nihalsid/sdf-gen.git
+cd sdf-gen
+mkdir build
+cd build
+cmake ..
+make
+cd ..
+mkdir bin
+cp build/bin/* bin
+```
+Make sure you have [this](https://github.com/JustusThies/PyMarchingCubes) implementation of pymarching cubes.
+
+Create a hierarchy of meshed shapes (this will take some time for higher resolution grids)
+
+```
+python process_hierarchy.py -i <path_to_CADTextures_root>/data/TestDatasetOutput
+```
+
+#### 3) Run quadriflow on the entire hierarchies 
+
+Make sure you have quadriflow downloaded and built. In data_processing/photoshape.py set `quadriflow_path = <path to quadriflow>`.
+
+Then run:
+```
+python data_processing/photoshape.py -i <path_to_CADTextures_root>/data/TestDatasetOutput/
+python data_processing/photoshape_fullres.py -i <path_to_CADTextures_root>/data/TestDatasetOutput/
+```
+
+#### 4) Hierarchy selection
+
+Make sure you have chamfer distance library installed: https://github.com/krrish94/chamferdist
+
+```
+python data_processing/select_hierarchy_level.py -i <path_to_CADTextures_root>/data/TestDatasetOutput/
+python data_processing/select_hierarchy_level_fullres.py -i <path_to_CADTextures_root>/data/TestDatasetOutput/
+```
+
+This will create a selection.json in each sample dir.
+
+#### 5) Finally, create the data required for face convs
+
+This might take some time.
+
+```
+python data_processing/process_mesh_for_conv_generalized_fullres.py -i data/TestDatasetOutput
+```
+
+This will generate ".pt" in data/TestDatasetOutput_processed which can be used by texturify code
+
+<hr/>
+
+Old stuff:
 
 ### Dependencies
 

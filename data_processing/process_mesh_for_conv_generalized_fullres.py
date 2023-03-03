@@ -10,6 +10,9 @@ from tqdm import tqdm
 
 from data_processing.add_mesh_features import laplace_weights, fundamental_forms, calculate_curvature
 from data_processing.process_mesh_for_conv import quadface_8_neighbors, cartesian_ordering, append_self_face
+import sys
+
+dataset = None
 
 
 def get_pool_down_map(mesh_src, mesh_tgt):
@@ -127,12 +130,11 @@ def process_mesh(mesh_input_directory, output_processed_directory):
 
 
 def all_export(proc, n_proc):
-    dataset = "Photoshape-model/shapenet-chairs-manifold-highres"
-    items = sorted([x.name for x in (Path("data") / dataset).iterdir()])
+    items = sorted([x.name for x in (Path(dataset)).iterdir()])
     print("Length of items: ", len(items))
-    mesh_in_dirs = [Path("data", dataset, item) for item in items]
+    mesh_in_dirs = [Path(dataset, item) for item in items]
     mesh_in_dirs = [x for i, x in enumerate(mesh_in_dirs) if i % n_proc == proc]
-    processed_out_dir = Path(f"data/Photoshape/shapenet-chairs-manifold-highres_processed/")
+    processed_out_dir = Path(dataset).parent / f"{Path(dataset).name}_processed"
     processed_out_dir.mkdir(exist_ok=True, parents=True)
     for m in tqdm(mesh_in_dirs):
         process_mesh(m, processed_out_dir)
@@ -142,8 +144,11 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
+    parser.add_argument('-i', '--input', type=str)
     parser.add_argument('-n', '--num_proc', default=1, type=int)
     parser.add_argument('-p', '--proc', default=0, type=int)
 
+
     args = parser.parse_args()
+    dataset = args.input
     all_export(args.proc, args.num_proc)

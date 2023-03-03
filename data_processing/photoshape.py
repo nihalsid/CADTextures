@@ -58,6 +58,7 @@ def quadriflow_wrapper(input_path):
         for res in resolutions:
             output_filename = f'quad_{fcount:05d}_{res:03d}'
             quad_dirname = f"{input_path.name}_{output_filename}"
+            # if it hangs, try without -sat and -mcf or with only one of them
             args = ["-sat", '-mcf', "-i", f"{str(input_path / f'{res:03d}.obj')}", '-o', f"{str(input_path / output_filename)}.obj", "-f", f"{fcount}"]
             collected_args.append([quad_dirname, ' '.join(args)])
 
@@ -94,6 +95,7 @@ def retopologize_file(path):
         target_faces = target_faces - decrement
         output_filename = path.name.split('.')[0]
         quad_dirname = f"{path.parent.name}_{output_filename}"
+        # if it hangs, try without -sat and -mcf or with only one of them
         args = ["-sat", '-mcf', "-i", f"{str(path.parent / f'{R:03d}.obj')}", '-o', f"{str(path.parent / output_filename)}.obj", "-f", f"{target_faces}"]
         quadriflow_executor([quad_dirname, ' '.join(args)])
         num_faces = trimesh.load(path, process=False).faces.shape[0]
